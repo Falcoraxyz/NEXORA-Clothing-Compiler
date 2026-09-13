@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXORA Clothing Compiler</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0f0f1a; color: #e0e0e0; }
+        
+        .header {
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            padding: 20px 40px;
+            border-bottom: 2px solid #0f3460;
+        }
+        .header h1 { color: #e94560; font-size: 24px; }
+        .header p { color: #888; margin-top: 5px; }
+        
+        .main {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        .panel {
+            background: #1a1a2e;
+            border-radius: 10px;
+            padding: 20px;
+            border: 1px solid #0f3460;
+        }
+        .panel h2 { color: #e94560; margin-bottom: 15px; font-size: 16px; }
+        
+        .full-width { grid-column: 1 / -1; }
+        
+        textarea {
+            width: 100%;
+            height: 400px;
+            background: #0f0f1a;
+            color: #e0e0e0;
+            border: 1px solid #0f3460;
+            border-radius: 5px;
+            padding: 15px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            resize: vertical;
+        }
+        
+        button {
+            background: #e94560;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+            margin-right: 10px;
+        }
+        button:hover { background: #c23152; }
+        button.secondary { background: #0f3460; }
+        button.secondary:hover { background: #0a2540; }
+        
+        .preset-buttons { margin-bottom: 15px; }
+        .preset-buttons button { padding: 8px 15px; font-size: 12px; }
+        
+        .output-preview {
+            text-align: center;
+            padding: 20px;
+        }
+        .output-preview img {
+            max-width: 100%;
+            max-height: 500px;
+            border: 1px solid #0f3460;
+            border-radius: 5px;
+        }
+        
+        .result-info {
+            background: #0f0f1a;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 15px;
+        }
+        .result-info .label { color: #888; font-size: 12px; }
+        .result-info .value { color: #e94560; font-size: 18px; font-weight: bold; }
+        
+        .status-pass { color: #4caf50; }
+        .status-fail { color: #f44336; }
+        
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        .metric {
+            background: #0f0f1a;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 15px;
+        }
+        .tab {
+            padding: 8px 15px;
+            background: #0f0f1a;
+            border: 1px solid #0f3460;
+            border-radius: 5px;
+            cursor: pointer;
+            color: #888;
+        }
+        .tab.active {
+            background: #0f3460;
+            color: #e94560;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>NEXORA Clothing Compiler v2.1</h1>
+        <p>Constraint-based clothing template generator for Roblox Studio</p>
+    </div>
+    
+    <div class="main">
+        <div class="panel full-width">
+            <h2>DSL Specification (JSON)</h2>
+            <div class="preset-buttons">
+                <button onclick="loadPreset('shirt')">Shirt (Hoodie)</button>
+                <button onclick="loadPreset('tshirt')">T-Shirt (Band)</button>
+                <button onclick="loadPreset('pants')">Pants (Cargo)</button>
+            </div>
+            <textarea id="spec-input" placeholder="Paste your clothing specification JSON here..."></textarea>
+            <div style="margin-top: 10px;">
+                <button onclick="generate()">Generate Template</button>
+                <button class="secondary" onclick="validate()">Validate Only</button>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h2>Output Preview</h2>
+            <div class="output-preview" id="preview-container">
+                <p style="color: #888;">No template generated yet</p>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h2>Validation Result</h2>
+            <div id="validation-result">
+                <p style="color: #888;">Click Validate to check spec</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let presets = {};
+        
+        // Load presets on page load
+        fetch('/api/presets').then(r => r.json()).then(data => {
+            presets = data;
+        });
+        
+        function loadPreset(type) {
+            const input = document.getElementById('spec-input');
+            if (presets[type]) {
+                input.value = JSON.stringify(presets[type], null, 2);
+            }
+        }
+        
+        function generate() {
+            const spec = JSON.parse(document.getElementById('spec-input').value);
+            
+            fetch('/api/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({spec, filename: `template_${Date.now()}.png`})
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    const preview = document.getElementById('preview-container');
+                    preview.innerHTML = `
+                        <img src="/output/${data.filename}" alt="Template" 
+                             onerror="this.style.display='none'">
+                        <div class="result-info">
+                            <div class="grid-2">
+                                <div class="metric">
+                                    <div class="label">Size</div>
+                                    <div class="value">${data.size[0]}x${data.size[1]}</div>
+                                </div>
+                                <div class="metric">
+                                    <div class="label">Status</div>
+                                    <div class="value status-pass">PASS</div>
+                                </div>
+                            </div>
+                            <div style="margin-top: 10px; color: #888;">
+                                ${data.path}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            });
+        }
+        
+        function validate() {
+            const spec = JSON.parse(document.getElementById('spec-input').value);
+            
+            fetch('/api/validate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({spec})
+            })
+            .then(r => r.json())
+            .then(data => {
+                const result = document.getElementById('validation-result');
+                if (data.success) {
+                    result.innerHTML = `
+                        <div class="grid-2">
+                            <div class="metric">
+                                <div class="label">Type</div>
+                                <div class="value">${data.garment_type}</div>
+                            </div>
+                            <div class="metric">
+                                <div class="label">Template</div>
+                                <div class="value">${data.template_size[0]}x${data.template_size[1]}</div>
+                            </div>
+                            <div class="metric">
+                                <div class="label">Panels</div>
+                                <div class="value">${data.panels}</div>
+                            </div>
+                            <div class="metric">
+                                <div class="label">Edges</div>
+                                <div class="value">${data.edge_constraints}</div>
+                            </div>
+                        </div>
+                        <div class="result-info" style="margin-top: 15px;">
+                            <h3 style="color: #e94560; margin-bottom: 10px;">Spec Summary</h3>
+                            <div style="font-size: 13px; line-height: 1.8;">
+                                <div><span style="color: #888;">Name:</span> ${data.spec_summary.name}</div>
+                                <div><span style="color: #888;">Theme:</span> ${data.spec_summary.theme}</div>
+                                <div><span style="color: #888;">Fit:</span> ${data.spec_summary.fit}</div>
+                                <div><span style="color: #888;">Color:</span> ${data.spec_summary.color}</div>
+                                <div><span style="color: #888;">Material:</span> ${data.spec_summary.material}</div>
+                                <div><span style="color: #888;">Zipper:</span> ${data.spec_summary.zipper}</div>
+                                <div><span style="color: #888;">Pocket:</span> ${data.spec_summary.pocket}</div>
+                                <div><span style="color: #888;">Stitch:</span> ${data.spec_summary.stitch}</div>
+                                <div><span style="color: #888;">Hood:</span> ${data.spec_summary.hood ? 'Yes' : 'No'}</div>
+                                <div><span style="color: #888;">Logo:</span> ${data.spec_summary.logo || 'None'}</div>
+                                <div><span style="color: #888;">Extras:</span> ${data.spec_summary.extras.join(', ') || 'None'}</div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    result.innerHTML = `<p class="status-fail">Error: ${data.error}</p>`;
+                }
+            });
+        }
+    </script>
+</body>
+</html>
