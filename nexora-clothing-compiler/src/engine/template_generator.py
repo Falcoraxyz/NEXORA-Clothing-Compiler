@@ -56,14 +56,14 @@ class ProceduralTemplateGeneratorV2:
         # Step 3: Add material properties (AO, normal, curvature)
         self._compose_materials()
         
-        # Step 4: Add decorations (logo, pocket, zipper)
+        # Step 4: Paste panels into template FIRST
+        self._paste_panels()
+        
+        # Step 5: Add decorations (logo, pocket, zipper) — drawn on template
         self._add_decorations()
         
-        # Step 5: Add stitches
+        # Step 6: Add stitches — drawn on template
         self._add_stitches()
-        
-        # Step 6: Paste panels into template
-        self._paste_panels()
         
         print(f"[TemplateGenerator] Template generated: {self.template_size}")
         return self.template
@@ -353,29 +353,318 @@ class ProceduralTemplateGeneratorV2:
             self.panel_pixels[panel_id] = pixels
     
     def _add_decorations(self):
-        """Add decorations: pocket, logo, hood, etc."""
+        """Add decorations directly to template image."""
         print("[TemplateGenerator] Adding decorations...")
         
         # Add pocket
         if self.spec.garment.pocket.style.value != "none":
-            self._add_pocket()
+            self._draw_pocket_on_template()
         
         # Add hood
         if self.spec.garment.hood:
-            self._add_hood()
+            self._draw_hood_on_template()
         
         # Add logo
-        if self.spec.garment.logo:
-            self._add_logo()
+        if self.spec.garment.logo and self.spec.garment.logo.is_valid:
+            self._draw_logo_on_template()
         
-        # Add extras (chain, belt, etc.)
+        # Add extras
         for extra in self.spec.garment.extras:
             if extra == "chain":
-                self._add_chain()
+                self._draw_chain_on_template()
             elif extra == "belt":
-                self._add_belt()
+                self._draw_belt_on_template()
+
+    def _draw_logo_on_template(self):
+        """Draw logo directly on template image."""
+        logo = self.spec.garment.logo
+        if not logo or not logo.is_valid:
+            return
+        
+        panel_id = "front" if "back" not in logo.position else "back"
+        if panel_id not in self.panel_positions:
+            return
+        
+        px, py, pw, ph = self.panel_positions[panel_id]
+        
+        logo_color = self._hex_to_rgb(self.spec.garment.color.accent or "#FFFFFF")
+        outline_color = self._hex_to_rgb(self.spec.garment.color.secondary or "#000000")
+        
+        # Logo center position (global coords)
+        if "center" in logo.position:
+            cx, cy = px + pw // 2, py + ph // 2
+        elif "chest" in logo.position:
+            cx, cy = px + pw // 3, py + ph // 3
+        else:
+            cx, cy = px + pw // 2, py + ph // 2
+        
+        logo_size = int(min(pw, ph) * logo.scale * 2)
+        style = logo.style.value
+        motif = logo.motif.upper()
+        
+        if style == "graffiti":
+            self._tpl_graffiti(cx, cy, logo_size, motif, logo_color, outline_color)
+        elif style == "throwup":
+            self._tpl_throwup(cx, cy, logo_size, motif, logo_color, outline_color)
+        elif style == "tag":
+            self._tpl_tag(cx, cy, logo_size, motif, logo_color)
+        elif style == "wildstyle":
+            self._tpl_wildstyle(cx, cy, logo_size, motif, logo_color, outline_color)
+        elif logo.motif == "skull":
+            self._tpl_skull(cx, cy, logo_size, logo_color)
+        else:
+            self._tpl_print_circle(cx, cy, logo_size, logo_color)
     
-    def _add_pocket(self):
+    def _tpl_graffiti(self, cx, cy, size, motif, color, outline):
+        """Draw graffiti on template."""
+        half = size // 2
+        letters = motif[:4]
+        letter_w = size // len(letters)
+        
+        for i, letter in enumerate(letters):
+            lx = cx - half + i * letter_w
+            ly = cy - half
+            
+            # Filled letter block
+            self.draw.rectangle([lx, ly, lx + letter_w - 2, ly + size], fill=color, outline=outline, width=2)
+            
+            # Highlight
+            self.draw.ellipse([lx + 4, ly + 4, lx + letter_w // 2, ly + size // 2], fill=None, outline=outline, width=1)
+            
+            # Arrow
+            if i == len(letters) - 1:
+                arrow_x = lx + letter_w
+                arrow_y = ly + size // 2
+                self.draw.polygon([(arrow_x, arrow_y), (arrow_x + 10, arrow_y - 5),
+                                 (arrow_x + 10, arrow_y + 5)], fill=color)
+    
+    def _tpl_throwup(self, cx, cy, size, motif, color, outline):
+        """Draw throwup on template."""
+        half = size // 2
+        letters = motif[:3]
+        letter_w = size // len(letters)
+        
+        for i, letter in enumerate(letters):
+            lx = cx - half + i * letter_w
+            ly = cy - half + (i % 2) * 8
+            
+            # Filled bubble
+            self.draw.ellipse([lx, ly, lx + letter_w - 4, ly + size - 4], fill=color, outline=outline, width=2)
+            
+            # Drip
+            drip_x = lx + letter_w // 2
+            for d in range(3):
+                self.draw.line([(drip_x + d * 3, ly + size - 4), (drip_x + d * 3, ly + size + 15 + d * 5)],
+                             fill=color, width=2)
+    
+    def _tpl_tag(self, cx, cy, size, motif, color):
+        """Draw tag swoosh on template."""
+        for i in range(size * 2):
+            t = i / (size * 2)
+            px = int(cx - size + t * size * 2)
+            py = int(cy + int(np.sin(t * np.pi * 3) * 8))
+            if 0 <= px < self.template_size[0] and 0 <= py < self.template_size[1]:
+                self.draw.ellipse([px - 1, py - 1, px + 1, py + 1], fill=color)
+    
+    def _tpl_wildstyle(self, cx, cy, size, motif, color, outline):
+        """Draw wildstyle on template."""
+        half = size // 2
+        letters = motif[:3]
+        letter_w = size // len(letters)
+        
+        for i, letter in enumerate(letters):
+            lx = cx - half + i * letter_w
+            ly = cy - half
+            
+            # Diamond
+            points = [(lx, ly + size), (lx + letter_w // 2, ly),
+                     (lx + letter_w, ly + size), (lx + letter_w // 2, ly + size // 2)]
+            self.draw.polygon(points, fill=color, outline=outline)
+            
+            # Arrow
+            self.draw.line([(lx - 10, cy), (lx + letter_w + 10, cy)], fill=color, width=3)
+            self.draw.polygon([(lx + letter_w + 10, cy), (lx + letter_w, cy - 5),
+                             (lx + letter_w, cy + 5)], fill=color)
+    
+    def _tpl_skull(self, cx, cy, size, color):
+        """Draw skull on template."""
+        half = size // 2
+        self.draw.ellipse([cx - half, cy - half, cx + half, cy + half], fill=color, outline=color, width=2)
+        # Eyes
+        eye_size = size // 5
+        self.draw.ellipse([cx - half + size // 4, cy - half + size // 3,
+                         cx - half + size // 4 + eye_size, cy - half + size // 3 + eye_size], fill=(0, 0, 0))
+        self.draw.ellipse([cx + half - size // 4 - eye_size, cy - half + size // 3,
+                         cx + half - size // 4, cy - half + size // 3 + eye_size], fill=(0, 0, 0))
+    
+    def _tpl_print_circle(self, cx, cy, size, color):
+        """Draw circle print on template."""
+        half = size // 2
+        self.draw.ellipse([cx - half, cy - half, cx + half, cy + half], fill=None, outline=color, width=3)
+    
+    def _draw_pocket_on_template(self):
+        """Draw pocket on template."""
+        front_panel_id = "front"
+        if front_panel_id not in self.panel_positions:
+            return
+        
+        px, py, pw, ph = self.panel_positions[front_panel_id]
+        color = self._hex_to_rgb(self.spec.garment.color.secondary or "#222222")
+        
+        pocket_style = self.spec.garment.pocket.style.value
+        
+        if pocket_style == "kangaroo":
+            self.draw.rectangle([px + pw // 4, py + ph // 3, px + pw * 3 // 4, py + ph * 2 // 3],
+                              fill=None, outline=color, width=2)
+            self.draw.line([(px + pw // 4, py + ph // 3 + 8), (px + pw * 3 // 4, py + ph // 3 + 8)],
+                         fill=color, width=2)
+        elif pocket_style == "cargo":
+            self.draw.rectangle([px + 15, py + ph // 3, px + pw - 15, py + ph * 2 // 3],
+                              fill=None, outline=color, width=2)
+            self.draw.line([(px + 15, py + ph // 3 - 2), (px + pw - 15, py + ph // 3 - 2)], fill=color, width=2)
+    
+    def _draw_hood_on_template(self):
+        """Draw hood on template."""
+        top_panel_id = "top"
+        if top_panel_id not in self.panel_positions:
+            return
+        
+        px, py, pw, ph = self.panel_positions[top_panel_id]
+        color = self._hex_to_rgb(self.spec.garment.color.secondary or "#222222")
+        
+        self.draw.line([(px + pw // 4, py), (px + pw // 4, py + ph // 2)], fill=color, width=2)
+        self.draw.line([(px + pw * 3 // 4, py), (px + pw * 3 // 4, py + ph // 2)], fill=color, width=2)
+        self.draw.line([(px + pw // 4, py), (px + pw * 3 // 4, py)], fill=color, width=2)
+    
+    def _draw_chain_on_template(self):
+        """Draw chain on template."""
+        front_panel_id = "front"
+        if front_panel_id not in self.panel_positions:
+            return
+        
+        px, py, pw, ph = self.panel_positions[front_panel_id]
+        color = self._hex_to_rgb("#C0C0C0")
+        
+        cx = px + pw // 2
+        for y in range(py + 5, py + ph // 2):
+            if y % 4 == 0:
+                self.draw.ellipse([cx - 2, y - 2, cx + 2, y + 2], fill=color)
+    
+    def _draw_belt_on_template(self):
+        """Draw belt on template."""
+        bottom_panel_id = "bottom"
+        if bottom_panel_id not in self.panel_positions:
+            return
+        
+        px, py, pw, ph = self.panel_positions[bottom_panel_id]
+        belt_color = self._hex_to_rgb("#8B7355")
+        buckle_color = self._hex_to_rgb("#C0C0C0")
+        
+        belt_y = py + ph // 2
+        self.draw.line([(px + 10, belt_y), (px + pw - 10, belt_y)], fill=belt_color, width=3)
+        
+        buckle_x = px + pw // 2
+        self.draw.rectangle([buckle_x - 6, belt_y - 4, buckle_x + 6, belt_y + 4], fill=buckle_color)
+    
+    def _add_pocket_to_pixels(self):
+        """Add pocket to panel pixels."""
+        front_panel_id = "front"
+        if front_panel_id not in self.panel_pixels:
+            return
+        
+        pixels = self.panel_pixels[front_panel_id]
+        h, w, _ = pixels.shape
+        
+        pocket_style = self.spec.garment.pocket.style.value
+        color = self._hex_to_rgb(self.spec.garment.color.secondary or "#222222")
+        
+        if pocket_style == "kangaroo":
+            # Large centered pocket
+            for dy in range(h // 3, h * 2 // 3):
+                for dx in range(w // 4, w * 3 // 4):
+                    if dy == h // 3 or dy == h * 2 // 3 - 1:
+                        pixels[dy, dx, :3] = color
+                    elif dx == w // 4 or dx == w * 3 // 4 - 1:
+                        pixels[dy, dx, :3] = color
+            # Opening line
+            for dx in range(w // 4, w * 3 // 4):
+                pixels[h // 3 + 8, dx, :3] = color
+        elif pocket_style == "cargo":
+            # Cargo pocket with flap
+            for dy in range(h // 3, h * 2 // 3):
+                for dx in range(15, w - 15):
+                    if dy == h // 3 or dy == h * 2 // 3 - 1 or dx == 15 or dx == w - 16:
+                        pixels[dy, dx, :3] = color
+            # Flap
+            for dx in range(15, w - 15):
+                pixels[h // 3 - 1, dx, :3] = color
+                pixels[h // 3 - 2, dx, :3] = color
+    
+    def _add_hood_to_pixels(self):
+        """Add hood to top panel pixels."""
+        top_panel_id = "top"
+        if top_panel_id not in self.panel_pixels:
+            return
+        
+        pixels = self.panel_pixels[top_panel_id]
+        h, w, _ = pixels.shape
+        
+        color = self._hex_to_rgb(self.spec.garment.color.secondary or "#222222")
+        
+        # Hood outline
+        for dx in range(w // 4, w * 3 // 4):
+            pixels[0, dx, :3] = color  # Top
+        for dy in range(h // 2):
+            pixels[dy, w // 4, :3] = color  # Left
+            pixels[dy, w * 3 // 4, :3] = color  # Right
+    
+    def _add_chain_to_pixels(self):
+        """Add chain accessory to front panel."""
+        front_panel_id = "front"
+        if front_panel_id not in self.panel_pixels:
+            return
+        
+        pixels = self.panel_pixels[front_panel_id]
+        h, w, _ = pixels.shape
+        
+        color = self._hex_to_rgb("#C0C0C0")
+        
+        # Vertical chain from neck to chest
+        cx = w // 2
+        for y in range(5, h // 2):
+            if y % 4 == 0:
+                for dx in range(-2, 3):
+                    if 0 <= cx + dx < w:
+                        pixels[y, cx + dx, :3] = color
+    
+    def _add_belt_to_pixels(self):
+        """Add belt to bottom panel."""
+        bottom_panel_id = "bottom"
+        if bottom_panel_id not in self.panel_pixels:
+            return
+        
+        pixels = self.panel_pixels[bottom_panel_id]
+        h, w, _ = pixels.shape
+        
+        belt_color = self._hex_to_rgb("#8B7355")
+        buckle_color = self._hex_to_rgb("#C0C0C0")
+        
+        # Belt line
+        belt_y = h // 2
+        for dx in range(10, w - 10):
+            pixels[belt_y, dx, :3] = belt_color
+            pixels[belt_y + 1, dx, :3] = belt_color
+        
+        # Buckle
+        buckle_x = w // 2
+        for dy in range(belt_y - 4, belt_y + 5):
+            for dx in range(buckle_x - 6, buckle_x + 7):
+                if 0 <= dy < h and 0 <= dx < w:
+                    pixels[dy, dx, :3] = buckle_color
+        # Buckle hole
+        for dy in range(belt_y - 2, belt_y + 3):
+            if 0 <= dy < h:
+                pixels[dy, buckle_x, :3] = belt_color
         """Add pocket to the front panel."""
         front_panel_id = "front"
         if front_panel_id not in self.graph.panels:

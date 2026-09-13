@@ -126,6 +126,34 @@ class GarmentSpec:
     logo: Optional[LogoSpec] = None
     extras: List[str] = field(default_factory=list)  # chain, belt, patch, etc.
 
+    def __post_init__(self):
+        """Ensure colors have good contrast."""
+        primary = self.color.primary
+        accent = self.color.accent
+        
+        # If accent is too similar to primary, auto-adjust
+        if self._color_distance(primary, accent) < 80:
+            # Make accent brighter/more contrasting
+            self.color.accent = self._contrast_color(primary)
+
+    def _color_distance(self, c1: str, c2: str) -> float:
+        """Calculate distance between two hex colors."""
+        r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
+        r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
+        return ((r1-r2)**2 + (g1-g2)**2 + (b1-b2)**2) ** 0.5
+
+    def _contrast_color(self, hex_color: str) -> str:
+        """Generate a contrasting color."""
+        r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+        brightness = (r + g + b) / 3
+        
+        if brightness < 128:
+            # Dark color → return bright accent
+            return "#FFFFFF" if brightness < 64 else "#FF4444"
+        else:
+            # Light color → return dark accent
+            return "#111111"
+
 
 @dataclass
 class ClothingSpec:
