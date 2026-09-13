@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+output/
+tests/output/
+*.png
+*.rbxmx
+.personal-roblox-mcp/
+bridge-token
