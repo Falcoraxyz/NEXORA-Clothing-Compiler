@@ -11,7 +11,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.compiler.dsl_schema import ClothingSpec, EXAMPLE_SPEC, EXAMPLE_TSHIRT_SPEC
+from src.compiler.dsl_schema import ClothingSpec, EXAMPLE_SPEC, EXAMPLE_TSHIRT_SPEC, EXAMPLE_PANTS_SPEC
 from src.compiler.constraint_solver import ConstraintSolver, solve_constraints
 from src.compiler.uv_constraint_graph import build_uv_graph
 from src.engine.template_generator import ProceduralTemplateGeneratorV2, generate_roblox_template_v2
@@ -101,6 +101,8 @@ def hex_to_rgb(hex_color: str) -> tuple:
 
 def main():
     """Run the compiler with example specs."""
+    results = {}
+    
     # Test Shirt
     print("=" * 60)
     print("TEST 1: Shirt (Gangster Hoodie)")
@@ -109,6 +111,7 @@ def main():
         os.path.dirname(os.path.abspath(__file__)), "output", "gangster_hoodie_v2.png"
     )
     template = compile_clothing(EXAMPLE_SPEC, output_path)
+    results["shirt"] = output_path
     
     # Test T-Shirt
     print("\n" + "=" * 60)
@@ -118,10 +121,22 @@ def main():
         os.path.dirname(os.path.abspath(__file__)), "output", "band_tee.png"
     )
     template2 = compile_clothing(EXAMPLE_TSHIRT_SPEC, output_path2)
+    results["tshirt"] = output_path2
     
-    print(f"\nShirt template: {output_path}")
-    print(f"T-Shirt template: {output_path2}")
-    return template, template2
+    # Test Pants
+    print("\n" + "=" * 60)
+    print("TEST 3: Pants (Cargo Pants)")
+    print("=" * 60)
+    output_path3 = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "output", "cargo_pants.png"
+    )
+    template3 = compile_clothing(EXAMPLE_PANTS_SPEC, output_path3)
+    results["pants"] = output_path3
+    
+    print(f"\n\nSummary:")
+    for name, path in results.items():
+        print(f"  {name}: {path}")
+    return results
 
 
 if __name__ == "__main__":

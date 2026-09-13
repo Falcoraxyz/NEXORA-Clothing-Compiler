@@ -258,6 +258,8 @@ class ProceduralTemplateGeneratorV2:
         for extra in self.spec.garment.extras:
             if extra == "chain":
                 self._add_chain()
+            elif extra == "belt":
+                self._add_belt()
     
     def _add_pocket(self):
         """Add pocket to the front panel."""
@@ -304,6 +306,32 @@ class ProceduralTemplateGeneratorV2:
                 fill=(0, 0, 0, 0),
                 outline=self._hex_to_rgb(self.spec.garment.color.secondary or "#222222"),
                 width=2
+            )
+        elif pocket_style == "cargo":
+            # Cargo pocket: large, with flap
+            pocket_x = x + 15
+            pocket_y = y + h // 3
+            pocket_w = w - 30
+            pocket_h = h // 3
+            
+            # Pocket body
+            self.draw.rectangle(
+                [pocket_x, pocket_y, pocket_x + pocket_w, pocket_y + pocket_h],
+                fill=(0, 0, 0, 60),
+                outline=self._hex_to_rgb(self.spec.garment.color.secondary or "#222222"),
+                width=2
+            )
+            # Pocket flap
+            self.draw.polygon([
+                (pocket_x, pocket_y),
+                (pocket_x + pocket_w, pocket_y),
+                (pocket_x + pocket_w - 5, pocket_y - 10),
+                (pocket_x + 5, pocket_y - 10),
+            ], fill=None, outline=self._hex_to_rgb(self.spec.garment.color.secondary or "#222222"), width=2)
+            # Button
+            self.draw.ellipse(
+                [pocket_x + pocket_w // 2 - 3, pocket_y - 5, pocket_x + pocket_w // 2 + 3, pocket_y + 1],
+                fill=self._hex_to_rgb(self.spec.garment.color.accent or "#FFFFFF")
             )
     
     def _add_hood(self):
@@ -426,6 +454,32 @@ class ProceduralTemplateGeneratorV2:
             cx = int(start_x + (end_x - start_x) * t)
             cy = int(start_y + (end_y - start_y) * t)
             self.draw.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=chain_color)
+    
+    def _add_belt(self):
+        """Add belt accessory around waist (bottom panel for pants)."""
+        # For pants, belt goes around the waist (top panel)
+        waist_panel_id = "top"
+        if waist_panel_id not in self.graph.panels:
+            waist_panel_id = "bottom"
+        
+        if waist_panel_id not in self.graph.panels:
+            return
+        
+        panel = self.graph.panels[waist_panel_id]
+        x, y, w, h = panel.template_position
+        
+        belt_color = self._hex_to_rgb("#8B7355")
+        
+        # Belt: horizontal line with buckle
+        belt_y = y + h // 2
+        
+        # Belt line
+        self.draw.line([(x + 10, belt_y), (x + w - 10, belt_y)], fill=belt_color, width=3)
+        
+        # Belt buckle
+        buckle_x = x + w // 2
+        self.draw.rectangle([buckle_x - 8, belt_y - 5, buckle_x + 8, belt_y + 5], fill=self._hex_to_rgb("#C0C0C0"))
+        self.draw.ellipse([buckle_x - 3, belt_y - 3, buckle_x + 3, belt_y + 3], fill=belt_color)
     
     def _add_stitches(self):
         """Add procedural stitches along panel edges."""

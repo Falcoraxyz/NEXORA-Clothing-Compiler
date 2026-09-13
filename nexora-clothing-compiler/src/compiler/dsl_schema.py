@@ -48,6 +48,7 @@ class StitchType(str, Enum):
 
 
 class LogoStyle(str, Enum):
+    NONE = "none"
     EMBROIDERY = "embroidery"
     PRINT = "print"
     PATCH = "patch"
@@ -96,6 +97,10 @@ class LogoSpec:
     motif: str = "skull"
     position: str = "left_chest"
     scale: float = 0.3
+
+    @property
+    def is_valid(self) -> bool:
+        return self.style != LogoStyle.NONE and self.motif != "none" and self.position != "none"
 
 
 @dataclass
@@ -223,11 +228,11 @@ class ClothingSpec:
                 spacing=stitch_data.get("spacing", 2.0),
             ),
             logo=LogoSpec(
-                style=LogoStyle(logo_data.get("style", "embroidery")),
-                motif=logo_data.get("motif", "skull"),
-                position=logo_data.get("position", "left_chest"),
-                scale=logo_data.get("scale", 0.3),
-            ) if logo_data else None,
+                style=LogoStyle(logo_data.get("style", "none")),
+                motif=logo_data.get("motif", "none"),
+                position=logo_data.get("position", "none"),
+                scale=logo_data.get("scale", 0.0),
+            ) if logo_data and logo_data.get("style") != "none" else None,
             extras=garment_data.get("extras", []),
         )
 
@@ -335,5 +340,54 @@ EXAMPLE_TSHIRT_SPEC = {
             "scale": 0.4
         },
         "extras": []
+    }
+}
+
+# Pants example
+EXAMPLE_PANTS_SPEC = {
+    "version": "1.0",
+    "name": "Cargo Pants",
+    "description": "Military-style cargo pants with pockets",
+    "theme": "military",
+    "garment": {
+        "type": "pants",
+        "fit": "regular",
+        "hood": False,
+        "sleeve_length": 1.0,
+        "length": 1.0,
+        "color": {
+            "primary": "#3B5323",
+            "secondary": "#2F4F2F",
+            "accent": "#8B7355"
+        },
+        "material": {
+            "fabric": "denim",
+            "roughness": 0.8,
+            "metallic": 0.0,
+            "normal_strength": 0.6
+        },
+        "zipper": {
+            "style": "none",
+            "color": "#C0C0C0",
+            "material": "metal"
+        },
+        "pocket": {
+            "style": "cargo",
+            "position": "side",
+            "size": 0.7
+        },
+        "stitch": {
+            "type": "single",
+            "color": "#8B7355",
+            "distance_from_edge": 3.0,
+            "spacing": 2.0
+        },
+        "logo": {
+            "style": "none",
+            "motif": "none",
+            "position": "none",
+            "scale": 0.0
+        },
+        "extras": ["belt"]
     }
 }
