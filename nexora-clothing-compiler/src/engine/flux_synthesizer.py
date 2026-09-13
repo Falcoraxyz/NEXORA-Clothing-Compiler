@@ -87,24 +87,77 @@ class FLUXTextureSynthesizer:
                         seed: Optional[int] = None) -> Optional[np.ndarray]:
         """
         Call FLUX API to generate texture.
-        Currently uses ComfyUI workflow structure.
+        Requires ComfyUI running on localhost:8188 with FLUX model loaded.
         """
-        # TODO: Implement actual ComfyUI API call
-        # For now, return None (will fall back to procedural)
+        try:
+            # Check if ComfyUI is running
+            response = requests.get(f"{self.FLUX_API_ENDPOINT}/system_stats", timeout=5)
+            if response.status_code != 200:
+                print(f"  [FLUX] ComfyUI not available at {self.FLUX_API_ENDPOINT}")
+                return None
+        except requests.exceptions.ConnectionError:
+            print(f"  [FLUX] ComfyUI not running — using procedural fallback")
+            return None
         
-        # ComfyUI API structure (pseudo-code):
-        # workflow = self._build_comfyui_workflow(prompt, resolution, seed)
-        # response = requests.post(
-        #     f"{self.FLUX_API_ENDPOINT}/prompt",
-        #     json={"prompt": workflow},
-        #     timeout=120
-        # )
-        # if response.status_code == 200:
-        #     result = response.json()
-        #     image_data = self._get_comfyui_image(result["prompt_id"])
-        #     return np.array(image_data)
+        # Build and submit workflow
+        workflow = self._build_comfyui_workflow(prompt, resolution, seed)
         
-        print(f"  [FLUX] API call not implemented yet — using procedural fallback")
+        try:
+            # Submit prompt
+            response = requests.post(
+                f"{self.FLUX_API_ENDPOINT}/prompt",
+                json={"prompt": workflow},
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                prompt_id = result.get("prompt_id")
+                
+                # Wait for completion
+                image_data = self._wait_for_completion(prompt_id)
+                if image_data:
+                    return np.array(image_data)
+            
+        except Exception as e:
+            print(f"  [FLUX] API error: {e}")
+        
+        return None
+    
+    def _wait_for_completion(self, prompt_id: str, timeout: int = 120) -> Optional[Image.Image]:
+        """Wait for ComfyUI to finish generating."""
+        import time
+        start = time.time()
+        
+        while time.time() - start < timeout:
+            try:
+                response = requests.get(
+                    f"{self.FLUX_API_ENDPOINT}/history/{prompt_id}",
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    history = response.json()
+                    if prompt_id in history and "outputs" in history[prompt_id]:
+                        outputs = history[prompt_id]["outputs"]
+                        for node_id, output in outputs.items():
+                            if "images" in output:
+                                for img_info in output["images"]:
+                                    filename = img_info.get("filename")
+                                    subfolder = img_info.get("subfolder", "")
+                                    img_type = img_info.get("type", "output")
+                                    
+                                    # Download image
+                                    img_response = requests.get(
+                                        f"{self.FLUX_API_ENDPOINT}/view?filename={filename}&subfolder={subfolder}&type={img_type}",
+                                        timeout=30
+                                    )
+                                    if img_response.status_code == 200:
+                                        return Image.open(BytesIO(img_response.content))
+            except Exception:
+                pass
+            
+            time.sleep(1)
+        
         return None
     
     def _get_cached_texture(self, fabric_type: str, resolution: int) -> Optional[np.ndarray]:
@@ -123,7 +176,7 @@ class FLUXTextureSynthesizer:
     def _cache_texture(self, fabric_type: str, resolution: int, texture: np.ndarray):
         """Save texture to cache."""
         cache_key = self._get_cache_key(fabric_type, resolution)
-        cache_path = os.path.join(self.CACHE_DIR, f"{cache_key}.npй")
+        cache_path = os.path.join(self.CACHE_DIR, f"{cache_key}.npy")
         
         try:
             np.save(cache_path, texture)
