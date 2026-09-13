@@ -69,13 +69,14 @@ class ProceduralTemplateGeneratorV2:
         return self.template
     
     def _generate_panel_albedos(self):
-        """Generate base albedo (color) for each panel."""
+        """Generate base albedo (color) for each panel with visible fabric texture."""
         primary = self._hex_to_rgb(self.spec.garment.color.primary)
         secondary = self._hex_to_rgb(self.spec.garment.color.secondary) if self.spec.garment.color.secondary else primary
         accent = self._hex_to_rgb(self.spec.garment.color.accent) if self.spec.garment.color.accent else primary
         
         material = self.spec.garment.material
         fabric = material.fabric.value
+        fit = self.spec.garment.fit
         
         for panel_id, panel in self.graph.panels.items():
             x, y, w, h = panel.template_position
@@ -89,50 +90,163 @@ class ProceduralTemplateGeneratorV2:
             pixels[:, :, 2] = primary[2]
             pixels[:, :, 3] = 255
             
-            # Add fabric-specific noise
+            # Add visible fabric texture based on material
             if fabric == "heavy_cotton":
-                noise = np.random.randint(-10, 10, (h, w, 3), dtype=np.int16)
-                pixels[:, :, :3] = np.clip(
-                    pixels[:, :, :3].astype(np.int16) + noise, 0, 255
-                ).astype(np.uint8)
+                self._apply_cotton_texture(pixels, primary, secondary)
             elif fabric == "denim":
-                for i in range(h):
-                    for j in range(w):
-                        if (i + j) % 3 == 0:
-                            pixels[i, j, :3] = np.clip(
-                                pixels[i, j, :3].astype(np.int16) - 15, 0, 255
-                            ).astype(np.uint8)
+                self._apply_denim_texture(pixels, primary, secondary)
             elif fabric == "leather":
-                noise = np.random.randint(-5, 5, (h, w, 3), dtype=np.int16)
-                pixels[:, :, :3] = np.clip(
-                    pixels[:, :, :3].astype(np.int16) + noise, 0, 255
-                ).astype(np.uint8)
+                self._apply_leather_texture(pixels, primary, secondary)
             elif fabric == "satin":
-                for i in range(h):
-                    sheen = int(np.sin(i / h * np.pi) * 10)
-                    pixels[i, :, :3] = np.clip(
-                        pixels[i, :, :3].astype(np.int16) + sheen, 0, 255
-                    ).astype(np.uint8)
+                self._apply_satin_texture(pixels, primary, accent)
+            elif fabric == "nylon":
+                self._apply_nylon_texture(pixels, primary, secondary)
+            elif fabric == "wool":
+                self._apply_wool_texture(pixels, primary, secondary)
             
-            # Add fabric folds (vertical gradient for shirt)
-            fit = self.spec.garment.fit
-            if fit == "oversized":
-                fold_intensity = 0.15
-                fold_frequency = 3
-            elif fit == "slim":
-                fold_intensity = 0.05
-                fold_frequency = 2
-            else:
-                fold_intensity = 0.10
-                fold_frequency = 2
+            # Add panel border highlight
+            self._apply_panel_border(pixels, accent)
             
-            for i in range(h):
-                fold = int(np.sin(i / h * np.pi * fold_frequency) * 20 * fold_intensity)
-                pixels[i, :, :3] = np.clip(
-                    pixels[i, :, :3].astype(np.int16) + fold, 0, 255
-                ).astype(np.uint8)
+            # Add fabric folds
+            self._apply_folds(pixels, fit)
             
             self.panel_pixels[panel_id] = pixels
+    
+    def _apply_cotton_texture(self, pixels, primary, secondary):
+        """Heavy cotton: subtle weave with color variation."""
+        h, w, _ = pixels.shape
+        for y in range(h):
+            for x in range(w):
+                # Diagonal weave pattern
+                weave = int(np.sin((x + y) * 0.3) * 8)
+                # Random fiber noise
+                noise = np.random.randint(-5, 5)
+                
+                # Color variation
+                r = np.clip(primary[0] + weave + noise, 0, 255)
+                g = np.clip(primary[1] + weave + noise, 0, 255)
+                b = np.clip(primary[2] + weave + noise, 0, 255)
+                
+                pixels[y, x, :3] = [r, g, b]
+    
+    def _apply_denim_texture(self, pixels, primary, secondary):
+        """Denim: diagonal twill weave pattern."""
+        h, w, _ = pixels.shape
+        for y in range(h):
+            for x in range(w):
+                # Diagonal twill pattern
+                twill = (x + y) % 4
+                if twill == 0:
+                    factor = 0.9
+                elif twill == 1:
+                    factor = 1.0
+                elif twill == 2:
+                    factor = 0.95
+                else:
+                    factor = 1.05
+                
+                noise = np.random.randint(-3, 3)
+                r = np.clip(int(primary[0] * factor) + noise, 0, 255)
+                g = np.clip(int(primary[1] * factor) + noise, 0, 255)
+                b = np.clip(int(primary[2] * factor) + noise + 5, 0, 255)
+                
+                pixels[y, x, :3] = [r, g, b]
+    
+    def _apply_leather_texture(self, pixels, primary, secondary):
+        """Leather: organic grain pattern."""
+        h, w, _ = pixels.shape
+        # Generate random grain spots
+        grain = np.random.randint(-15, 15, (h, w))
+        
+        # Smooth the grain
+        from scipy.ndimage import gaussian_filter
+        if h > 10 and w > 10:
+            grain = gaussian_filter(grain.astype(float), sigma=2).astype(int)
+        
+        for y in range(h):
+            for x in range(w):
+                g = grain[y, x]
+                r = np.clip(primary[0] + g, 0, 255)
+                g_val = np.clip(primary[1] + g - 5, 0, 255)
+                b = np.clip(primary[2] + g - 10, 0, 255)
+                
+                pixels[y, x, :3] = [r, g_val, b]
+    
+    def _apply_satin_texture(self, pixels, primary, accent):
+        """Satin: smooth with horizontal sheen."""
+        h, w, _ = pixels.shape
+        for y in range(h):
+            # Horizontal sheen gradient
+            sheen = int(np.sin(y / h * np.pi) * 20)
+            for x in range(w):
+                noise = np.random.randint(-3, 3)
+                r = np.clip(primary[0] + sheen + noise, 0, 255)
+                g = np.clip(primary[1] + sheen + noise, 0, 255)
+                b = np.clip(primary[2] + sheen + noise, 0, 255)
+                
+                pixels[y, x, :3] = [r, g, b]
+    
+    def _apply_nylon_texture(self, pixels, primary, secondary):
+        """Nylon: fine crosshatch pattern."""
+        h, w, _ = pixels.shape
+        for y in range(h):
+            for x in range(w):
+                # Fine crosshatch
+                cross = int(np.sin(x * 0.5) * np.sin(y * 0.5) * 10)
+                noise = np.random.randint(-3, 3)
+                
+                r = np.clip(primary[0] + cross + noise, 0, 255)
+                g = np.clip(primary[1] + cross + noise, 0, 255)
+                b = np.clip(primary[2] + cross + noise, 0, 255)
+                
+                pixels[y, x, :3] = [r, g, b]
+    
+    def _apply_wool_texture(self, pixels, primary, secondary):
+        """Wool: knitted pattern with loops."""
+        h, w, _ = pixels.shape
+        for y in range(h):
+            for x in range(w):
+                # Knit pattern
+                knit = int(np.sin(x * 0.4) * np.sin(y * 0.4) * 12)
+                noise = np.random.randint(-8, 8)
+                
+                r = np.clip(primary[0] + knit + noise, 0, 255)
+                g = np.clip(primary[1] + knit + noise, 0, 255)
+                b = np.clip(primary[2] + knit + noise, 0, 255)
+                
+                pixels[y, x, :3] = [r, g, b]
+    
+    def _apply_panel_border(self, pixels, accent):
+        """Add visible panel border."""
+        h, w, _ = pixels.shape
+        border = 2
+        
+        # Top border
+        pixels[:border, :, :3] = accent
+        # Bottom border
+        pixels[-border:, :, :3] = accent
+        # Left border
+        pixels[:, :border, :3] = accent
+        # Right border
+        pixels[:, -border:, :3] = accent
+    
+    def _apply_folds(self, pixels, fit):
+        """Add fabric fold shadows."""
+        h, w, _ = pixels.shape
+        
+        if fit == "oversized":
+            fold_intensity = 15
+            fold_freq = 2
+        elif fit == "slim":
+            fold_intensity = 5
+            fold_freq = 1
+        else:
+            fold_intensity = 10
+            fold_freq = 2
+        
+        for y in range(h):
+            fold = int(np.sin(y / h * np.pi * fold_freq) * fold_intensity)
+            pixels[y, :, :3] = np.clip(pixels[y, :, :3].astype(np.int16) + fold, 0, 255).astype(np.uint8)
     
     def _solve_seams(self):
         """
