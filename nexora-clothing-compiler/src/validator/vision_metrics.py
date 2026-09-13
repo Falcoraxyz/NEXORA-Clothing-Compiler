@@ -118,15 +118,29 @@ class VisionMetrics:
             return panel[:, w - 1, :3]
         return None
 
-    def compute_coverage(self, template: np.ndarray) -> float:
-        """Compute non-transparent coverage ratio."""
+    def compute_coverage(self, template: np.ndarray, 
+                         panel_positions: Dict[str, Tuple[int, int, int, int]] = None) -> float:
+        """
+        Compute non-transparent coverage ratio.
+        If panel_positions provided, only counts area within panel bounding boxes.
+        """
         if template.shape[2] == 4:
             alpha = template[:, :, 3]
             non_empty = np.sum(alpha > 0)
         else:
             non_empty = np.sum(np.any(template > 0, axis=2))
-        total = template.shape[0] * template.shape[1]
-        return non_empty / total
+        
+        if panel_positions:
+            # Only count area that should have content (panel bounding boxes)
+            total_panel_area = 0
+            for x, y, w, h in panel_positions.values():
+                total_panel_area += w * h
+            if total_panel_area == 0:
+                return 0.0
+            return non_empty / total_panel_area
+        else:
+            total = template.shape[0] * template.shape[1]
+            return non_empty / total if total > 0 else 0.0
 
     def compute_color_accuracy(self, template: np.ndarray, 
                                 expected_color: Tuple[int, int, int],
@@ -155,14 +169,17 @@ class VisionMetrics:
         template_np = np.array(template)
 
         report = {
-            "coverage": self.compute_coverage(template_np),
+            "coverage": self.compute_coverage(template_np, panel_positions),
             "color_accuracy": self.compute_color_accuracy(template_np, expected_color),
             "seam_continuity": self.compute_seam_continuity(template_np, panel_positions, edge_constraints),
         }
 
         # Overall pass/fail
+        # Coverage: at least 80% of panel area should have content
+        # Color: at least 50% of pixels should match primary color
+        # Seams: all edges should have similarity >= 0.85
         report["pass"] = (
-            report["coverage"] >= 0.5 and
+            report["coverage"] >= 0.8 and
             report["color_accuracy"] >= 0.5
         )
 

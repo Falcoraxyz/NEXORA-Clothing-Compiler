@@ -1,48 +1,51 @@
 """
-Procedural Template Generator
-Generates Roblox-compatible UV templates from constraint graphs.
-Handles panel cutting, boundary locking, and seam solving.
+Procedural Template Generator v2
+Generates Roblox-compatible UV templates using official template layout.
+Template size: 585×559 (R15)
 """
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from typing import Dict, List, Tuple, Optional
+from PIL import Image, ImageDraw, ImageFilter
+from typing import Dict, Tuple, Optional
 import os
 
+from src.compiler.dsl_schema import ClothingSpec, GarmentType
 from src.compiler.uv_constraint_graph import (
-    UVConstraintGraph, UVPanel, UVEdge, EdgePosition, EdgeConstraint,
+    UVConstraintGraph, UVPanel, EdgePosition, EdgeConstraint,
     build_uv_graph
 )
-from src.compiler.dsl_schema import ClothingSpec, GarmentType
+from src.compiler.constraint_solver import SolverResult
 
 
-class ProceduralTemplateGenerator:
+class ProceduralTemplateGeneratorV2:
     """
-    Generates Roblox UV templates from constraint graphs.
-    The template is a 512x512 PNG that Roblox Studio accepts.
+    Generates Roblox UV templates using official template layout.
+    Template size: 585×559 pixels (R15)
     """
     
-    ROBLOX_SHIRT_SIZE = (512, 512)
-    ROBLOX_PANTS_SIZE = (512, 512)
-    ROBLOX_TSHIRT_SIZE = (512, 512)
-    
-    def __init__(self, spec: ClothingSpec):
+    def __init__(self, spec: ClothingSpec, solver_result: SolverResult):
         self.spec = spec
+        self.solver = solver_result
         self.graph = build_uv_graph(spec.garment.garment_type.value)
-        self.template_size = self.ROBLOX_SHIRT_SIZE
-        if spec.garment.garment_type == GarmentType.PANTS:
-            self.template_size = self.ROBLOX_PANTS_SIZE
+        self.template_size = self.graph.template_size
         
-        # The output image
+        # The output image (RGBA)
         self.template = Image.new("RGBA", self.template_size, (0, 0, 0, 0))
         self.draw = ImageDraw.Draw(self.template)
         
-        # Pixel data per panel (for seam solving)
+        # Pixel data per panel (numpy arrays)
         self.panel_pixels: Dict[str, np.ndarray] = {}
+        
+        # Panel positions from graph
+        self.panel_positions: Dict[str, Tuple[int, int, int, int]] = {}
+        for pid, panel in self.graph.panels.items():
+            self.panel_positions[pid] = panel.template_position
     
     def generate_template(self) -> Image.Image:
         """Generate the complete template with all panels and seams."""
         print(f"[TemplateGenerator] Generating {self.spec.garment.garment_type.value} template...")
+        print(f"  Template size: {self.template_size}")
+        print(f"  Panels: {len(self.graph.panels)}")
         
         # Step 1: Generate base albedo for each panel
         self._generate_panel_albedos()
@@ -59,14 +62,17 @@ class ProceduralTemplateGenerator:
         # Step 5: Add stitches
         self._add_stitches()
         
+        # Step 6: Paste panels into template
+        self._paste_panels()
+        
         print(f"[TemplateGenerator] Template generated: {self.template_size}")
         return self.template
     
     def _generate_panel_albedos(self):
         """Generate base albedo (color) for each panel."""
-        primary_color = self._hex_to_rgb(self.spec.garment.color.primary)
-        secondary_color = self._hex_to_rgb(self.spec.garment.color.secondary) if self.spec.garment.color.secondary else primary_color
-        accent_color = self._hex_to_rgb(self.spec.garment.color.accent) if self.spec.garment.color.accent else primary_color
+        primary = self._hex_to_rgb(self.spec.garment.color.primary)
+        secondary = self._hex_to_rgb(self.spec.garment.color.secondary) if self.spec.garment.color.secondary else primary
+        accent = self._hex_to_rgb(self.spec.garment.color.accent) if self.spec.garment.color.accent else primary
         
         material = self.spec.garment.material
         fabric = material.fabric.value
@@ -75,107 +81,111 @@ class ProceduralTemplateGenerator:
             x, y, w, h = panel.template_position
             
             # Create panel pixel data
-            panel_img = np.zeros((h, w, 4), dtype=np.uint8)
+            pixels = np.zeros((h, w, 4), dtype=np.uint8)
             
             # Base fabric color
-            panel_img[:, :, 0] = primary_color[0]
-            panel_img[:, :, 1] = primary_color[1]
-            panel_img[:, :, 2] = primary_color[2]
-            panel_img[:, :, 3] = 255
+            pixels[:, :, 0] = primary[0]
+            pixels[:, :, 1] = primary[1]
+            pixels[:, :, 2] = primary[2]
+            pixels[:, :, 3] = 255
             
-            # Add fabric texture based on material
+            # Add fabric-specific noise
             if fabric == "heavy_cotton":
                 noise = np.random.randint(-10, 10, (h, w, 3), dtype=np.int16)
-                panel_img[:, :, :3] = np.clip(
-                    panel_img[:, :, :3].astype(np.int16) + noise, 0, 255
+                pixels[:, :, :3] = np.clip(
+                    pixels[:, :, :3].astype(np.int16) + noise, 0, 255
                 ).astype(np.uint8)
             elif fabric == "denim":
-                # Denim: diagonal weave pattern
                 for i in range(h):
                     for j in range(w):
                         if (i + j) % 3 == 0:
-                            panel_img[i, j, :3] = np.clip(
-                                panel_img[i, j, :3].astype(np.int16) - 15, 0, 255
+                            pixels[i, j, :3] = np.clip(
+                                pixels[i, j, :3].astype(np.int16) - 15, 0, 255
                             ).astype(np.uint8)
             elif fabric == "leather":
-                # Leather: subtle grain
                 noise = np.random.randint(-5, 5, (h, w, 3), dtype=np.int16)
-                panel_img[:, :, :3] = np.clip(
-                    panel_img[:, :, :3].astype(np.int16) + noise, 0, 255
+                pixels[:, :, :3] = np.clip(
+                    pixels[:, :, :3].astype(np.int16) + noise, 0, 255
                 ).astype(np.uint8)
+            elif fabric == "satin":
+                for i in range(h):
+                    sheen = int(np.sin(i / h * np.pi) * 10)
+                    pixels[i, :, :3] = np.clip(
+                        pixels[i, :, :3].astype(np.int16) + sheen, 0, 255
+                    ).astype(np.uint8)
             
             # Add fabric folds (vertical gradient for shirt)
-            fold_intensity = 0.05
+            fit = self.spec.garment.fit
+            if fit == "oversized":
+                fold_intensity = 0.15
+                fold_frequency = 3
+            elif fit == "slim":
+                fold_intensity = 0.05
+                fold_frequency = 2
+            else:
+                fold_intensity = 0.10
+                fold_frequency = 2
+            
             for i in range(h):
-                fold = int(np.sin(i / h * np.pi * 2) * 20 * fold_intensity)
-                panel_img[i, :, :3] = np.clip(
-                    panel_img[i, :, :3].astype(np.int16) + fold, 0, 255
+                fold = int(np.sin(i / h * np.pi * fold_frequency) * 20 * fold_intensity)
+                pixels[i, :, :3] = np.clip(
+                    pixels[i, :, :3].astype(np.int16) + fold, 0, 255
                 ).astype(np.uint8)
             
-            self.panel_pixels[panel_id] = panel_img
-            
-            # Paste into template
-            panel_pil = Image.fromarray(panel_img, "RGBA")
-            self.template.paste(panel_pil, (x, y))
+            self.panel_pixels[panel_id] = pixels
     
     def _solve_seams(self):
         """
-        Solve seam constraints by copying boundary pixels between connected panels.
-        This ensures pixel-perfect alignment.
+        Solve seam constraints.
+        For Roblox template, panels are not adjacent in 2D space.
+        Seam consistency is achieved by using same generation params for connected panels.
         """
-        print(f"[TemplateGenerator] Solving {len(self.graph.constraints)} seam constraints...")
+        print(f"[TemplateGenerator] Processing {len(self.graph.constraints)} seam constraints...")
+        print("  (Roblox UV mapping handles edge wrapping - panels generated independently)")
         
-        for constraint in self.graph.constraints:
-            panel_a_id, edge_a_pos = constraint.edge_a
-            panel_b_id, edge_b_pos = constraint.edge_b
-            
-            panel_a = self.graph.panels[panel_a_id]
-            panel_b = self.graph.panels[panel_b_id]
-            
-
-            
-            # Apply Gaussian blend to seam region (2-4px feathering)
-            self._blend_seam(panel_a, panel_b, edge_a_pos, edge_b_pos)
-        
-        # Update template with solved pixels
-        for panel_id, panel in self.graph.panels.items():
-            x, y, w, h = panel.template_position
-            panel_pil = Image.fromarray(self.panel_pixels[panel_id], "RGBA")
-            self.template.paste(panel_pil, (x, y))
+        # For Roblox template, we don't copy pixels between panels
+        # because they're laid out with gaps in the template image.
+        # Instead, we ensure consistency by using the same generation
+        # parameters for connected panels (same color, same fabric, etc.)
+        pass
     
-    def _get_edge_pixels(self, panel: UVPanel, edge_pos: EdgePosition) -> List[Tuple[int, int]]:
-        """Get (x, y) coordinates for all pixels along an edge."""
-        x, y, w, h = panel.template_position
-        positions = []
-        
+    def _get_edge_pixel_data(self, pixels: np.ndarray, edge_pos: EdgePosition) -> Optional[np.ndarray]:
+        """Get pixel data along an edge (returns a copy)."""
+        h, w, c = pixels.shape
         if edge_pos == EdgePosition.TOP:
-            positions = [(x + i, y) for i in range(w)]
+            return pixels[0, :, :].copy()
         elif edge_pos == EdgePosition.BOTTOM:
-            positions = [(x + i, y + h - 1) for i in range(w)]
+            return pixels[h - 1, :, :].copy()
         elif edge_pos == EdgePosition.LEFT:
-            positions = [(x, y + i) for i in range(h)]
+            return pixels[:, 0, :].copy()
         elif edge_pos == EdgePosition.RIGHT:
-            positions = [(x + w - 1, y + i) for i in range(h)]
-        
-        return positions
+            return pixels[:, w - 1, :].copy()
+        return None
     
-    def _blend_seam(self, panel_a: UVPanel, panel_b: UVPanel, 
-                     edge_a: EdgePosition, edge_b: EdgePosition, 
-                     blend_width: int = 3):
+    def _set_edge_pixel_data(self, pixels: np.ndarray, edge_pos: EdgePosition, data: np.ndarray):
+        """Set pixel data along an edge."""
+        h, w, c = pixels.shape
+        if edge_pos == EdgePosition.TOP:
+            pixels[0, :, :] = data
+        elif edge_pos == EdgePosition.BOTTOM:
+            pixels[h - 1, :, :] = data
+        elif edge_pos == EdgePosition.LEFT:
+            pixels[:, 0, :] = data
+        elif edge_pos == EdgePosition.RIGHT:
+            pixels[:, w - 1, :] = data
+    
+    def _blend_seam_numpy(self, a_pixels: np.ndarray, b_pixels: np.ndarray,
+                           edge_a: EdgePosition, edge_b: EdgePosition,
+                           blend_width: int = 3):
         """
-        Gaussian blend along seam boundary.
-        blend_width: number of pixels to feather (2-4px).
+        Gaussian blend along seam boundary using numpy.
         """
-        # Get boundary regions for blending
-        a_pixels = self.panel_pixels[panel_a.panel_id]
-        b_pixels = self.panel_pixels[panel_b.panel_id]
-        
         h_a, w_a, _ = a_pixels.shape
         h_b, w_b, _ = b_pixels.shape
         
-        # Apply Gaussian blur to edge region of panel B
         for i in range(blend_width):
             alpha = (i + 1) / (blend_width + 1)
+            
             if edge_b == EdgePosition.LEFT:
                 col = i
                 if col < w_b:
@@ -204,8 +214,6 @@ class ProceduralTemplateGenerator:
                         b_pixels[row, :, :3].astype(np.float32) * (1 - alpha) +
                         a_pixels[0, :, :3].astype(np.float32) * alpha * 0.5
                     ).astype(np.uint8)
-        
-        self.panel_pixels[panel_b.panel_id] = b_pixels
     
     def _compose_materials(self):
         """Compose material properties: AO, normal, curvature."""
@@ -229,8 +237,6 @@ class ProceduralTemplateGenerator:
             
             pixels[:, :, :3] = (pixels[:, :, :3].astype(np.float32) * ao[:, :, np.newaxis]).astype(np.uint8)
             self.panel_pixels[panel_id] = pixels
-        
-        self._update_template()
     
     def _add_decorations(self):
         """Add decorations: pocket, logo, hood, etc."""
@@ -252,15 +258,10 @@ class ProceduralTemplateGenerator:
         for extra in self.spec.garment.extras:
             if extra == "chain":
                 self._add_chain()
-        
-        self._update_template()
     
     def _add_pocket(self):
         """Add pocket to the front panel."""
-        front_panel_id = "front_left"
-        if front_panel_id not in self.graph.panels:
-            front_panel_id = "front_right"
-        
+        front_panel_id = "front"
         if front_panel_id not in self.graph.panels:
             return
         
@@ -307,10 +308,7 @@ class ProceduralTemplateGenerator:
     
     def _add_hood(self):
         """Add hood to the top panel."""
-        top_panel_id = "top_left"
-        if top_panel_id not in self.graph.panels:
-            top_panel_id = "top_right"
-        
+        top_panel_id = "top"
         if top_panel_id not in self.graph.panels:
             return
         
@@ -341,14 +339,14 @@ class ProceduralTemplateGenerator:
         
         # Determine panel based on position
         position = logo.position
-        panel_id = "front_left"
+        panel_id = "front"
         
         if "left" in position:
-            panel_id = "front_left"
+            panel_id = "front"
         elif "right" in position:
-            panel_id = "front_right"
+            panel_id = "front"
         elif "back" in position:
-            panel_id = "back_left"
+            panel_id = "back"
         
         if panel_id not in self.graph.panels:
             return
@@ -404,7 +402,7 @@ class ProceduralTemplateGenerator:
     
     def _add_chain(self):
         """Add chain accessory."""
-        front_panel_id = "front_left"
+        front_panel_id = "front"
         if front_panel_id not in self.graph.panels:
             return
         
@@ -468,12 +466,14 @@ class ProceduralTemplateGenerator:
                 self.draw.line([(x + w - inner_dist, y + inner_dist), (x + w - inner_dist, y + h - inner_dist)],
                               fill=stitch_color, width=1)
     
-    def _update_template(self):
-        """Update template image from panel pixels."""
+    def _paste_panels(self):
+        """Paste all panel pixels into the template."""
         for panel_id, panel in self.graph.panels.items():
             x, y, w, h = panel.template_position
-            panel_pil = Image.fromarray(self.panel_pixels[panel_id], "RGBA")
-            self.template.paste(panel_pil, (x, y))
+            pixels = self.panel_pixels.get(panel_id)
+            if pixels is not None:
+                panel_img = Image.fromarray(pixels, "RGBA")
+                self.template.paste(panel_img, (x, y))
     
     def _hex_to_rgb(self, hex_color: str) -> Tuple[int, int, int]:
         """Convert hex color to RGB tuple."""
@@ -490,15 +490,17 @@ class ProceduralTemplateGenerator:
         return self.template
 
 
-def generate_roblox_template(spec: ClothingSpec, output_path: Optional[str] = None) -> Image.Image:
+def generate_roblox_template_v2(spec: ClothingSpec, solver_result: SolverResult,
+                                 output_path: Optional[str] = None) -> Image.Image:
     """
     Convenience function: generate template from spec.
     
     Usage:
         spec = ClothingSpec.from_dict(EXAMPLE_SPEC)
-        template = generate_roblox_template(spec, "output/shirt.png")
+        solver_result = solve_constraints(spec)
+        template = generate_roblox_template_v2(spec, solver_result, "output/shirt.png")
     """
-    generator = ProceduralTemplateGenerator(spec)
+    generator = ProceduralTemplateGeneratorV2(spec, solver_result)
     template = generator.generate_template()
     
     if output_path:

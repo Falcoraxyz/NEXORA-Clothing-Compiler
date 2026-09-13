@@ -1,7 +1,7 @@
 """
-Constraint Solver
+Constraint Solver v2
 Translates ClothingSpec + UV graph into actionable per-panel constraints.
-Outputs a deterministic constraint map that the engine executes.
+Uses official Roblox template layout (585×559).
 """
 
 import numpy as np
@@ -16,12 +16,12 @@ from src.compiler.uv_constraint_graph import (
 
 
 class ConstraintType(str, Enum):
-    BOUNDARY_MATCH = "boundary_match"      # Edge must match adjacent panel
-    COLOR_FILL = "color_fill"              # Fill interior with color
-    MATERIAL_PROPS = "material_props"      # AO, roughness, normal
-    FOLD_GEOMETRY = "fold_geometry"        # Fabric fold direction/stiffness
-    DECORATION = "decoration"              # Logo, pocket, zipper, etc.
-    STITCH_PATTERN = "stitch_pattern"      # Procedural stitch
+    BOUNDARY_MATCH = "boundary_match"
+    COLOR_FILL = "color_fill"
+    MATERIAL_PROPS = "material_props"
+    FOLD_GEOMETRY = "fold_geometry"
+    DECORATION = "decoration"
+    STITCH_PATTERN = "stitch_pattern"
 
 
 @dataclass
@@ -63,8 +63,7 @@ class SolverResult:
 class ConstraintSolver:
     """
     Translates a ClothingSpec into actionable constraints per panel.
-    
-    This is the bridge between "what the user wants" and "what the engine executes".
+    Uses official Roblox template layout.
     """
 
     def __init__(self, spec: ClothingSpec):
@@ -76,7 +75,7 @@ class ConstraintSolver:
         """Run all constraint generation steps."""
         result = SolverResult(
             garment_type=self.spec.garment.garment_type.value,
-            template_size=(512, 512),
+            template_size=self.graph.template_size,
         )
 
         # Step 1: Boundary constraints (UV edge matching)
@@ -111,7 +110,7 @@ class ConstraintSolver:
                 "edge_b": {"panel": pb_id, "edge": eb_pos.value},
                 "constraint_id": constraint.constraint_id,
                 "flip": constraint.flip,
-                "blend_width": 3,  # pixels
+                "blend_width": 3,
                 "blend_method": "gaussian",
             }
             result.edge_constraints.append(edge_constraint)
@@ -139,7 +138,7 @@ class ConstraintSolver:
                 "metallic": material.metallic,
                 "normal_strength": material.normal_strength,
                 "ao_edge_darkening": 0.3,
-                "ao_radius": 8,  # pixels from edge
+                "ao_radius": 8,
             })
 
             result.panel_constraints[panel_id] = pc
@@ -149,18 +148,16 @@ class ConstraintSolver:
         fit = self.garment.fit
         garment_type = self.garment.garment_type
 
-        # Determine fold intensity based on fit
         if fit == "oversized":
             fold_intensity = 0.15
             fold_frequency = 3
         elif fit == "slim":
             fold_intensity = 0.05
             fold_frequency = 2
-        else:  # regular
+        else:
             fold_intensity = 0.10
             fold_frequency = 2
 
-        # Folds run vertically for shirts, horizontally for pants
         if garment_type == GarmentType.PANTS:
             fold_direction = "horizontal"
         else:
@@ -172,7 +169,7 @@ class ConstraintSolver:
                 "direction": fold_direction,
                 "intensity": fold_intensity,
                 "frequency": fold_frequency,
-                "decay_from_edge": 0.5,  # folds fade near boundaries
+                "decay_from_edge": 0.5,
             })
             result.panel_constraints[panel_id] = pc
 
@@ -180,8 +177,8 @@ class ConstraintSolver:
         """Generate decoration placement constraints."""
         # Pocket
         if self.garment.pocket.style.value != "none":
-            front_panel = self._get_front_panel()
-            if front_panel:
+            front_panel = "front"
+            if front_panel in self.graph.panels:
                 pc = result.panel_constraints.get(front_panel, PanelConstraint(panel_id=front_panel))
                 pc.add(ConstraintType.DECORATION, {
                     "type": "pocket",
@@ -194,8 +191,11 @@ class ConstraintSolver:
 
         # Logo
         if self.garment.logo:
-            logo_panel = self._get_panel_for_position(self.garment.logo.position)
-            if logo_panel:
+            logo_panel = "front"
+            if "back" in self.garment.logo.position:
+                logo_panel = "back"
+            
+            if logo_panel in self.graph.panels:
                 pc = result.panel_constraints.get(logo_panel, PanelConstraint(panel_id=logo_panel))
                 pc.add(ConstraintType.DECORATION, {
                     "type": "logo",
@@ -209,10 +209,9 @@ class ConstraintSolver:
 
         # Zipper
         if self.garment.zipper.style.value != "none":
-            # Zipper runs down the front center
-            front_panels = [pid for pid in self.graph.panels if "front" in pid]
-            for fp in front_panels:
-                pc = result.panel_constraints.get(fp, PanelConstraint(panel_id=fp))
+            front_panel = "front"
+            if front_panel in self.graph.panels:
+                pc = result.panel_constraints.get(front_panel, PanelConstraint(panel_id=front_panel))
                 pc.add(ConstraintType.DECORATION, {
                     "type": "zipper",
                     "style": self.garment.zipper.style.value,
@@ -220,13 +219,13 @@ class ConstraintSolver:
                     "material": self.garment.zipper.material,
                     "position": "center",
                 })
-                result.panel_constraints[fp] = pc
+                result.panel_constraints[front_panel] = pc
 
         # Extras
         for extra in self.garment.extras:
             if extra == "chain":
-                front_panel = self._get_front_panel()
-                if front_panel:
+                front_panel = "front"
+                if front_panel in self.graph.panels:
                     pc = result.panel_constraints.get(front_panel, PanelConstraint(panel_id=front_panel))
                     pc.add(ConstraintType.DECORATION, {
                         "type": "chain",
@@ -255,34 +254,12 @@ class ConstraintSolver:
     def _solve_global_constraints(self, result: SolverResult):
         """Global template constraints."""
         result.global_constraints = {
-            "template_size": (512, 512),
-            "panel_size": 128,
-            "background": (0, 0, 0, 0),  # Transparent
+            "template_size": self.graph.template_size,
+            "background": (0, 0, 0, 0),
             "blend_width": 3,
-            "seam_method": "gaussian",  # gaussian, poisson, laplacian
+            "seam_method": "gaussian",
             "color_space": "sRGB",
         }
-
-    def _get_front_panel(self) -> Optional[str]:
-        """Get the primary front panel ID."""
-        for pid in ["front_left", "front_right"]:
-            if pid in self.graph.panels:
-                return pid
-        return None
-
-    def _get_panel_for_position(self, position: str) -> Optional[str]:
-        """Map a named position to a panel."""
-        if "left" in position and "chest" in position:
-            return "front_left"
-        elif "right" in position and "chest" in position:
-            return "front_right"
-        elif "back" in position:
-            return "back_left"
-        elif "sleeve" in position:
-            if "left" in position:
-                return "left_sleeve_top"
-            return "right_sleeve_top"
-        return "front_left"  # default
 
 
 def solve_constraints(spec: ClothingSpec) -> SolverResult:

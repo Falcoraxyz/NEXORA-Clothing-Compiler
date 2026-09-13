@@ -288,3 +288,52 @@ EXAMPLE_SPEC = {
         "extras": ["chain"]
     }
 }
+
+# T-Shirt example (single 512×512 panel)
+EXAMPLE_TSHIRT_SPEC = {
+    "version": "1.0",
+    "name": "Band Tee",
+    "description": "Simple black band t-shirt with logo",
+    "theme": "rock",
+    "garment": {
+        "type": "tshirt",
+        "fit": "regular",
+        "hood": False,
+        "sleeve_length": 1.0,
+        "length": 1.0,
+        "color": {
+            "primary": "#000000",
+            "secondary": "#FFFFFF",
+            "accent": "#FF0000"
+        },
+        "material": {
+            "fabric": "heavy_cotton",
+            "roughness": 0.7,
+            "metallic": 0.0,
+            "normal_strength": 0.5
+        },
+        "zipper": {
+            "style": "none",
+            "color": "#C0C0C0",
+            "material": "metal"
+        },
+        "pocket": {
+            "style": "none",
+            "position": "center",
+            "size": 0.5
+        },
+        "stitch": {
+            "type": "single",
+            "color": "#333333",
+            "distance_from_edge": 3.0,
+            "spacing": 2.0
+        },
+        "logo": {
+            "style": "print",
+            "motif": "star",
+            "position": "center",
+            "scale": 0.4
+        },
+        "extras": []
+    }
+}

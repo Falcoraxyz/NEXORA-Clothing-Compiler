@@ -1,7 +1,6 @@
 """
-UV Constraint Graph
-Represents the topology of a Roblox garment template.
-Each panel has edges that must match with adjacent panel edges.
+UV Constraint Graph - Roblox Official Template Layout
+Based on Template-Shirts-R15.png (585×559)
 """
 
 from dataclasses import dataclass, field
@@ -17,48 +16,16 @@ class EdgePosition(str, Enum):
 
 
 @dataclass
-class UVEdge:
-    """Represents one edge of a panel."""
-    edge_id: int
-    panel_id: str
-    position: EdgePosition
-    # The pixels along this edge (row or column indices)
-    # For a 512x512 panel, this would be 512 pixels
-    pixels: Optional[List[Tuple[int, int, int]]] = None  # RGB tuples
-    locked: bool = False  # If True, this edge is a constraint boundary
-
-    def get_pixel_positions(self, panel_size: int) -> List[Tuple[int, int]]:
-        """Get (x, y) positions for this edge."""
-        positions = []
-        if self.position == EdgePosition.TOP:
-            positions = [(x, 0) for x in range(panel_size)]
-        elif self.position == EdgePosition.BOTTOM:
-            positions = [(x, panel_size - 1) for x in range(panel_size)]
-        elif self.position == EdgePosition.LEFT:
-            positions = [(0, y) for y in range(panel_size)]
-        elif self.position == EdgePosition.RIGHT:
-            positions = [(panel_size - 1, y) for y in range(panel_size)]
-        return positions
-
-
-@dataclass
 class UVPanel:
     """Represents one panel in the UV template."""
     panel_id: str
     name: str
-    # Position in the final template (x, y, width, height)
+    # Position in the template (x, y, width, height)
     template_position: Tuple[int, int, int, int]
-    edges: Dict[EdgePosition, UVEdge] = field(default_factory=dict)
-    # Interior region (excluding boundary pixels)
-    interior_bounds: Optional[Tuple[int, int, int, int]] = None
-
-    def __post_init__(self):
-        if not self.edges:
-            self.edges = {}
-        if not self.interior_bounds:
-            x, y, w, h = self.template_position
-            # Interior is 1px inset from each edge
-            self.interior_bounds = (x + 1, y + 1, w - 2, h - 2)
+    # Color in the template (for reference)
+    template_color: Tuple[int, int, int] = (0, 0, 0)
+    # Whether this panel is on the body (True) or limbs (False)
+    is_body: bool = True
 
 
 @dataclass
@@ -67,20 +34,16 @@ class EdgeConstraint:
     constraint_id: int
     edge_a: Tuple[str, EdgePosition]  # (panel_id, position)
     edge_b: Tuple[str, EdgePosition]  # (panel_id, position)
-    # Optional: flip direction (for mirrored panels)
     flip: bool = False
 
 
 @dataclass
 class UVConstraintGraph:
-    """
-    Complete UV topology for a garment type.
-    Contains all panels and their edge constraints.
-    """
+    """Complete UV topology for a garment type."""
     garment_type: str
+    template_size: Tuple[int, int]
     panels: Dict[str, UVPanel] = field(default_factory=dict)
     constraints: List[EdgeConstraint] = field(default_factory=list)
-    panel_size: int = 64  # Each panel is 64x64 pixels in Roblox template
 
     def add_panel(self, panel: UVPanel):
         self.panels[panel.panel_id] = panel
@@ -88,200 +51,183 @@ class UVConstraintGraph:
     def add_constraint(self, constraint: EdgeConstraint):
         self.constraints.append(constraint)
 
-    def get_shared_edges(self) -> List[Tuple[str, EdgePosition, str, EdgePosition]]:
-        """Get all pairs of edges that must match."""
-        shared = []
-        for c in self.constraints:
-            shared.append((c.edge_a[0], c.edge_a[1], c.edge_b[0], c.edge_b[1]))
-        return shared
+    def get_panel(self, panel_id: str) -> Optional[UVPanel]:
+        return self.panels.get(panel_id)
 
-    def get_locked_edges(self) -> List[Tuple[str, EdgePosition]]:
-        """Get all edges that are locked (boundary constraints)."""
-        locked = []
-        for panel in self.panels.values():
-            for pos, edge in panel.edges.items():
-                if edge.locked:
-                    locked.append((panel.panel_id, pos))
-        return locked
+    def get_body_panels(self) -> Dict[str, UVPanel]:
+        return {pid: p for pid, p in self.panels.items() if p.is_body}
 
-    def get_interior_panels(self) -> Dict[str, Tuple[int, int, int, int]]:
-        """Get interior bounds for each panel (where AI can generate)."""
-        interiors = {}
-        for pid, panel in self.panels.items():
-            interiors[pid] = panel.interior_bounds
-        return interiors
+    def get_limb_panels(self) -> Dict[str, UVPanel]:
+        return {pid: p for pid, p in self.panels.items() if not p.is_body}
 
 
 def build_roblox_shirt_graph() -> UVConstraintGraph:
     """
-    Build the UV constraint graph for a Roblox Shirt template.
+    Build UV constraint graph for Roblox Shirt template.
     
-    Roblox Shirt template layout (512x512):
-    ┌─────────┬─────────┬─────────┬─────────┐
-    │  Back   │  Top    │  Front  │ Bottom  │
-    │ (L-Back)│ (L-Top) │ (L-Frn) │ (L-Bot) │
-    ├─────────┼─────────┼─────────┼─────────┤
-    │  Back   │  Top    │  Front  │ Bottom  │
-    │ (R-Back)│ (R-Top) │ (R-Frn) │ (R-Bot) │
-    ├─────────┼─────────┼─────────┼─────────┤
-    │  L-Slv  │ L-Slv   │ R-Slv   │ R-Slv   │
-    │  (Top)  │ (Bot)   │ (Top)   │ (Bot)   │
-    └─────────┴─────────┴─────────┴─────────┘
+    Template: 585×559 pixels
+    Layout (from Template-Shirts-R15.png):
     
-    Each panel is 128x128 in the template.
+    Row 0 (y=8, h=64):     [Top 128×64]
+    Row 1 (y=74, h=128):   [TorsoL 64×128][Back 128×128][TorsoR 64×128][Front 128×128]
+    Row 2 (y=204, h=64):   [Bottom 128×64]
+    Row 3 (y=289, h=64):   [LeftSmall1 64×64][RightSmall1 64×64]
+    Row 4 (y=355, h=128):  [LArmOut 64×128][LLegOut 64×128][LArmIn 64×128][LLegIn 64×128][RLegIn 64×128][RArmIn 64×128][RLegOut 64×128][RArmOut 64×128]
+    Row 5 (y=485, h=64):   [LeftSmall2 64×64][RightSmall2 64×64]
     """
-    graph = UVConstraintGraph(garment_type="shirt", panel_size=64)
+    graph = UVConstraintGraph(
+        garment_type="shirt",
+        template_size=(585, 559),
+    )
     
-    # Panel definitions: (id, name, template_position)
-    # Template is 512x512, divided into 4x4 grid of 128x128 panels
+    # Panel definitions from template analysis
     panels_def = [
-        ("back_left", "Back Left", (0, 0, 128, 128)),
-        ("top_left", "Top Left", (128, 0, 128, 128)),
-        ("front_left", "Front Left", (256, 0, 128, 128)),
-        ("bottom_left", "Bottom Left", (384, 0, 128, 128)),
-        ("back_right", "Back Right", (0, 128, 128, 128)),
-        ("top_right", "Top Right", (128, 128, 128, 128)),
-        ("front_right", "Front Right", (256, 128, 128, 128)),
-        ("bottom_right", "Bottom Right", (384, 128, 128, 128)),
-        ("left_sleeve_top", "Left Sleeve Top", (0, 256, 128, 128)),
-        ("left_sleeve_bottom", "Left Sleeve Bottom", (128, 256, 128, 128)),
-        ("right_sleeve_top", "Right Sleeve Top", (256, 256, 128, 128)),
-        ("right_sleeve_bottom", "Right Sleeve Bottom", (384, 256, 128, 128)),
+        # Body panels
+        ("front", "Front", (427, 74, 128, 128), (0, 116, 189), True),
+        ("back", "Back", (231, 74, 128, 128), (226, 35, 26), True),
+        ("top", "Top", (231, 8, 128, 64), (0, 162, 255), True),
+        ("bottom", "Bottom", (231, 204, 128, 64), (246, 136, 2), True),
+        ("torso_left", "Torso Left", (165, 74, 64, 128), (2, 183, 87), True),
+        ("torso_right", "Torso Right", (361, 74, 64, 128), (246, 183, 2), True),
+        
+        # Small panels
+        ("left_small_1", "Left Small 1", (217, 289, 64, 64), (0, 162, 255), False),
+        ("right_small_1", "Right Small 1", (308, 289, 64, 64), (0, 162, 255), False),
+        ("left_small_2", "Left Small 2", (217, 485, 64, 64), (246, 136, 2), False),
+        ("right_small_2", "Right Small 2", (308, 485, 64, 64), (246, 136, 2), False),
+        
+        # Arm/Leg panels
+        ("left_arm_outer", "Left Arm Outer", (19, 355, 64, 128), (246, 183, 2), False),
+        ("left_leg_outer", "Left Leg Outer", (85, 355, 64, 128), (0, 116, 189), False),
+        ("left_arm_inner", "Left Arm Inner", (151, 355, 64, 128), (2, 183, 87), False),
+        ("left_leg_inner", "Left Leg Inner", (217, 355, 64, 128), (226, 35, 26), False),
+        ("right_leg_inner", "Right Leg Inner", (308, 355, 64, 128), (226, 35, 26), False),
+        ("right_arm_inner", "Right Arm Inner", (374, 355, 64, 128), (246, 183, 2), False),
+        ("right_leg_outer", "Right Leg Outer", (440, 355, 64, 128), (0, 116, 189), False),
+        ("right_arm_outer", "Right Arm Outer", (506, 355, 64, 128), (2, 183, 87), False),
     ]
     
-    for pid, name, pos in panels_def:
+    for pid, name, pos, color, is_body in panels_def:
         panel = UVPanel(
             panel_id=pid,
             name=name,
             template_position=pos,
+            template_color=color,
+            is_body=is_body,
         )
-        # Add edges
-        for edge_pos in EdgePosition:
-            edge = UVEdge(
-                edge_id=len(graph.constraints) * 4 + len(panel.edges),
-                panel_id=pid,
-                position=edge_pos,
-            )
-            panel.edges[edge_pos] = edge
         graph.add_panel(panel)
     
-    # Define constraints (edges that must match)
-    # Front panel edges connect to adjacent panels
-    constraints_def = [
-        # Front Left connects to Front Right along vertical center
-        ("front_left", EdgePosition.RIGHT, "front_right", EdgePosition.LEFT),
-        # Front Left connects to Top Left
-        ("front_left", EdgePosition.TOP, "top_left", EdgePosition.BOTTOM),
-        # Front Left connects to Bottom Left
-        ("front_left", EdgePosition.BOTTOM, "bottom_left", EdgePosition.TOP),
-        # Front Right connects to Top Right
-        ("front_right", EdgePosition.TOP, "top_right", EdgePosition.BOTTOM),
-        # Front Right connects to Bottom Right
-        ("front_right", EdgePosition.BOTTOM, "bottom_right", EdgePosition.TOP),
-        # Back Left connects to Back Right
-        ("back_left", EdgePosition.RIGHT, "back_right", EdgePosition.LEFT),
-        # Back Left connects to Top Left
-        ("back_left", EdgePosition.TOP, "top_left", EdgePosition.TOP),  # mirrored
-        # Back Right connects to Top Right
-        ("back_right", EdgePosition.TOP, "top_right", EdgePosition.TOP),  # mirrored
-        # Sleeve connections
-        ("left_sleeve_top", EdgePosition.BOTTOM, "left_sleeve_bottom", EdgePosition.TOP),
-        ("right_sleeve_top", EdgePosition.BOTTOM, "right_sleeve_bottom", EdgePosition.TOP),
-        # Left sleeve connects to body
-        ("left_sleeve_top", EdgePosition.RIGHT, "back_left", EdgePosition.LEFT),
-        ("left_sleeve_bottom", EdgePosition.RIGHT, "top_left", EdgePosition.LEFT),
-        # Right sleeve connects to body
-        ("right_sleeve_top", EdgePosition.LEFT, "front_right", EdgePosition.RIGHT),
-        ("right_sleeve_bottom", EdgePosition.LEFT, "bottom_right", EdgePosition.RIGHT),
+    # Edge constraints (body panels)
+    # Front connects to Top, Bottom, Torso Left, Torso Right
+    body_constraints = [
+        # Front-Top
+        ("front", EdgePosition.TOP, "top", EdgePosition.BOTTOM),
+        # Front-Bottom
+        ("front", EdgePosition.BOTTOM, "bottom", EdgePosition.TOP),
+        # Front-Torso Right (front's left edge connects to torso_right's right edge)
+        ("front", EdgePosition.LEFT, "torso_right", EdgePosition.RIGHT),
+        # Front-Torso Left (front's right edge connects to torso_left... no wait)
+        # Actually front is at x=427, torso_right is at x=361 (right of front)
+        # So front's RIGHT edge connects to torso_right's LEFT edge
+        ("front", EdgePosition.RIGHT, "torso_right", EdgePosition.LEFT),
+        
+        # Back-Top
+        ("back", EdgePosition.TOP, "top", EdgePosition.TOP),
+        # Back-Bottom
+        ("back", EdgePosition.BOTTOM, "bottom", EdgePosition.BOTTOM),
+        # Back-Torso Left
+        ("back", EdgePosition.LEFT, "torso_left", EdgePosition.LEFT),
+        # Back-Torso Right
+        ("back", EdgePosition.RIGHT, "torso_left", EdgePosition.RIGHT),
+        
+        # Torso Left-Torso Right (they meet at the side)
+        ("torso_left", EdgePosition.RIGHT, "torso_right", EdgePosition.LEFT),
+        
+        # Top-Bottom (they wrap around)
+        ("top", EdgePosition.LEFT, "torso_left", EdgePosition.TOP),
+        ("top", EdgePosition.RIGHT, "torso_right", EdgePosition.TOP),
+        ("bottom", EdgePosition.LEFT, "torso_left", EdgePosition.BOTTOM),
+        ("bottom", EdgePosition.RIGHT, "torso_right", EdgePosition.BOTTOM),
     ]
     
-    for i, (pa, ea, pb, eb) in enumerate(constraints_def):
+    # Limb constraints
+    limb_constraints = [
+        # Left arm/leg chain
+        ("left_arm_outer", EdgePosition.RIGHT, "left_leg_outer", EdgePosition.LEFT),
+        ("left_leg_outer", EdgePosition.RIGHT, "left_arm_inner", EdgePosition.LEFT),
+        ("left_arm_inner", EdgePosition.RIGHT, "left_leg_inner", EdgePosition.LEFT),
+        
+        # Right arm/leg chain
+        ("right_leg_inner", EdgePosition.RIGHT, "right_arm_inner", EdgePosition.LEFT),
+        ("right_arm_inner", EdgePosition.RIGHT, "right_leg_outer", EdgePosition.LEFT),
+        ("right_leg_outer", EdgePosition.RIGHT, "right_arm_outer", EdgePosition.LEFT),
+        
+        # Small panels connect to limbs
+        ("left_small_1", EdgePosition.LEFT, "left_arm_inner", EdgePosition.BOTTOM),
+        ("left_small_1", EdgePosition.RIGHT, "left_leg_inner", EdgePosition.BOTTOM),
+        ("right_small_1", EdgePosition.LEFT, "right_leg_inner", EdgePosition.BOTTOM),
+        ("right_small_1", EdgePosition.RIGHT, "right_arm_inner", EdgePosition.BOTTOM),
+        
+        ("left_small_2", EdgePosition.LEFT, "left_arm_inner", EdgePosition.BOTTOM),
+        ("left_small_2", EdgePosition.RIGHT, "left_leg_inner", EdgePosition.BOTTOM),
+        ("right_small_2", EdgePosition.LEFT, "right_leg_inner", EdgePosition.BOTTOM),
+        ("right_small_2", EdgePosition.RIGHT, "right_arm_inner", EdgePosition.BOTTOM),
+    ]
+    
+    all_constraints = body_constraints + limb_constraints
+    
+    for i, (pa, ea, pb, eb) in enumerate(all_constraints):
         constraint = EdgeConstraint(
             constraint_id=i,
             edge_a=(pa, ea),
             edge_b=(pb, eb),
         )
         graph.add_constraint(constraint)
-        # Mark edges as locked
-        graph.panels[pa].edges[ea].locked = True
-        graph.panels[pb].edges[eb].locked = True
     
     return graph
 
 
 def build_roblox_pants_graph() -> UVConstraintGraph:
-    """
-    Build the UV constraint graph for Roblox Pants template.
+    """Build UV constraint graph for Roblox Pants template."""
+    graph = UVConstraintGraph(
+        garment_type="pants",
+        template_size=(585, 559),
+    )
     
-    Roblox Pants template layout (512x512):
-    ┌─────────┬─────────┬─────────┬─────────┐
-    │ L-Leg   │ L-Leg   │ R-Leg   │ R-Leg   │
-    │ (Back)  │ (Front) │ (Front) │ (Back)  │
-    ├─────────┼─────────┼─────────┼─────────┤
-    │ L-Leg   │ L-Leg   │ R-Leg   │ R-Leg   │
-    │ (Back)  │ (Front) │ (Front) │ (Back)  │
-    ├─────────┼─────────┼─────────┼─────────┤
-    │ L-Leg   │ L-Leg   │ R-Leg   │ R-Leg   │
-    │ (Back)  │ (Front) │ (Front) │ (Back)  │
-    ├─────────┼─────────┼─────────┼─────────┤
-    │ L-Leg   │ L-Leg   │ R-Leg   │ R-Leg   │
-    │ (Back)  │ (Front) │ (Front) │ (Back)  │
-    └─────────┴─────────┴─────────┴─────────┘
-    """
-    graph = UVConstraintGraph(garment_type="pants", panel_size=64)
+    # Pants template has similar layout but for legs
+    # For now, use shirt graph as base
+    # TODO: Extract pants-specific layout from Template-Pants-R15.png
     
     panels_def = [
-        ("left_leg_back_1", "Left Leg Back 1", (0, 0, 128, 128)),
-        ("left_leg_front_1", "Left Leg Front 1", (128, 0, 128, 128)),
-        ("right_leg_front_1", "Right Leg Front 1", (256, 0, 128, 128)),
-        ("right_leg_back_1", "Right Leg Back 1", (384, 0, 128, 128)),
-        ("left_leg_back_2", "Left Leg Back 2", (0, 128, 128, 128)),
-        ("left_leg_front_2", "Left Leg Front 2", (128, 128, 128, 128)),
-        ("right_leg_front_2", "Right Leg Front 2", (256, 128, 128, 128)),
-        ("right_leg_back_2", "Right Leg Back 2", (384, 128, 128, 128)),
-        ("left_leg_back_3", "Left Leg Back 3", (0, 256, 128, 128)),
-        ("left_leg_front_3", "Left Leg Front 3", (128, 256, 128, 128)),
-        ("right_leg_front_3", "Right Leg Front 3", (256, 256, 128, 128)),
-        ("right_leg_back_3", "Right Leg Back 3", (384, 256, 128, 128)),
-        ("left_leg_back_4", "Left Leg Back 4", (0, 384, 128, 128)),
-        ("left_leg_front_4", "Left Leg Front 4", (128, 384, 128, 128)),
-        ("right_leg_front_4", "Right Leg Front 4", (256, 384, 128, 128)),
-        ("right_leg_back_4", "Right Leg Back 4", (384, 384, 128, 128)),
+        ("front", "Front", (427, 74, 128, 128), (0, 116, 189), True),
+        ("back", "Back", (231, 74, 128, 128), (226, 35, 26), True),
+        ("top", "Top", (231, 8, 128, 64), (0, 162, 255), True),
+        ("bottom", "Bottom", (231, 204, 128, 64), (246, 136, 2), True),
+        ("torso_left", "Torso Left", (165, 74, 64, 128), (2, 183, 87), True),
+        ("torso_right", "Torso Right", (361, 74, 64, 128), (246, 183, 2), True),
     ]
     
-    for pid, name, pos in panels_def:
+    for pid, name, pos, color, is_body in panels_def:
         panel = UVPanel(
             panel_id=pid,
             name=name,
             template_position=pos,
+            template_color=color,
+            is_body=is_body,
         )
-        for edge_pos in EdgePosition:
-            edge = UVEdge(
-                edge_id=len(graph.constraints) * 4 + len(panel.edges),
-                panel_id=pid,
-                position=edge_pos,
-            )
-            panel.edges[edge_pos] = edge
         graph.add_panel(panel)
     
-    # Pants constraints - simplified for brevity
+    # Pants constraints (simplified)
     constraints_def = [
-        # Left leg connections
-        ("left_leg_back_1", EdgePosition.RIGHT, "left_leg_front_1", EdgePosition.LEFT),
-        ("left_leg_back_1", EdgePosition.BOTTOM, "left_leg_back_2", EdgePosition.TOP),
-        ("left_leg_front_1", EdgePosition.BOTTOM, "left_leg_front_2", EdgePosition.TOP),
-        ("left_leg_back_2", EdgePosition.BOTTOM, "left_leg_back_3", EdgePosition.TOP),
-        ("left_leg_front_2", EdgePosition.BOTTOM, "left_leg_front_3", EdgePosition.TOP),
-        ("left_leg_back_3", EdgePosition.BOTTOM, "left_leg_back_4", EdgePosition.TOP),
-        ("left_leg_front_3", EdgePosition.BOTTOM, "left_leg_front_4", EdgePosition.TOP),
-        # Right leg connections
-        ("right_leg_front_1", EdgePosition.RIGHT, "right_leg_back_1", EdgePosition.LEFT),
-        ("right_leg_front_1", EdgePosition.BOTTOM, "right_leg_front_2", EdgePosition.TOP),
-        ("right_leg_back_1", EdgePosition.BOTTOM, "right_leg_back_2", EdgePosition.TOP),
-        ("right_leg_front_2", EdgePosition.BOTTOM, "right_leg_front_3", EdgePosition.TOP),
-        ("right_leg_back_2", EdgePosition.BOTTOM, "right_leg_back_3", EdgePosition.TOP),
-        ("right_leg_front_3", EdgePosition.BOTTOM, "right_leg_front_4", EdgePosition.TOP),
-        ("right_leg_back_3", EdgePosition.BOTTOM, "right_leg_back_4", EdgePosition.TOP),
+        ("front", EdgePosition.TOP, "top", EdgePosition.BOTTOM),
+        ("front", EdgePosition.BOTTOM, "bottom", EdgePosition.TOP),
+        ("front", EdgePosition.RIGHT, "torso_right", EdgePosition.LEFT),
+        ("front", EdgePosition.LEFT, "torso_right", EdgePosition.RIGHT),
+        ("back", EdgePosition.TOP, "top", EdgePosition.TOP),
+        ("back", EdgePosition.BOTTOM, "bottom", EdgePosition.BOTTOM),
+        ("back", EdgePosition.LEFT, "torso_left", EdgePosition.LEFT),
+        ("back", EdgePosition.RIGHT, "torso_left", EdgePosition.RIGHT),
+        ("torso_left", EdgePosition.RIGHT, "torso_right", EdgePosition.LEFT),
     ]
     
     for i, (pa, ea, pb, eb) in enumerate(constraints_def):
@@ -291,18 +237,37 @@ def build_roblox_pants_graph() -> UVConstraintGraph:
             edge_b=(pb, eb),
         )
         graph.add_constraint(constraint)
-        graph.panels[pa].edges[ea].locked = True
-        graph.panels[pb].edges[eb].locked = True
     
     return graph
 
 
-# Factory function
 def build_uv_graph(garment_type: str) -> UVConstraintGraph:
     """Build UV constraint graph based on garment type."""
-    if garment_type in ("shirt", "tshirt", "jacket"):
+    if garment_type == "tshirt":
+        return build_roblox_tshirt_graph()
+    elif garment_type in ("shirt", "jacket"):
         return build_roblox_shirt_graph()
     elif garment_type == "pants":
         return build_roblox_pants_graph()
     else:
         raise ValueError(f"Unknown garment type: {garment_type}")
+
+
+def build_roblox_tshirt_graph() -> UVConstraintGraph:
+    """Build UV constraint graph for T-Shirt (single 512×512 panel)."""
+    graph = UVConstraintGraph(
+        garment_type="tshirt",
+        template_size=(512, 512),
+    )
+    
+    panel = UVPanel(
+        panel_id="front",
+        name="Front",
+        template_position=(0, 0, 512, 512),
+        template_color=(255, 255, 255),
+        is_body=True,
+    )
+    graph.add_panel(panel)
+    # No edge constraints needed — single panel
+    
+    return graph
