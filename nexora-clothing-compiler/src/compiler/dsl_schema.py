@@ -13,6 +13,7 @@ class GarmentType(str, Enum):
     PANTS = "pants"
     TSHIRT = "tshirt"
     JACKET = "jacket"
+    HOODIE = "hoodie"
 
 
 class MaterialType(str, Enum):
@@ -37,6 +38,9 @@ class PocketStyle(str, Enum):
     SIDE = "side"
     CHEST = "chest"
     CARGO = "cargo"
+    FLAP = "flap"
+    WELT = "welt"
+    PATCH = "patch"
 
 
 class StitchType(str, Enum):
@@ -338,6 +342,55 @@ EXAMPLE_TSHIRT_SPEC = {
             "motif": "star",
             "position": "center",
             "scale": 0.4
+        },
+        "extras": []
+    }
+}
+
+# Jacket example
+EXAMPLE_JACKET_SPEC = {
+    "version": "1.0",
+    "name": "Bomber Jacket",
+    "description": "Classic bomber jacket with ribbed cuffs",
+    "theme": "street",
+    "garment": {
+        "type": "jacket",
+        "fit": "regular",
+        "hood": False,
+        "sleeve_length": 1.0,
+        "length": 0.8,
+        "color": {
+            "primary": "#2F4F2F",
+            "secondary": "#1a1a1a",
+            "accent": "#C0C0C0"
+        },
+        "material": {
+            "fabric": "nylon",
+            "roughness": 0.6,
+            "metallic": 0.0,
+            "normal_strength": 0.4
+        },
+        "zipper": {
+            "style": "full",
+            "color": "#C0C0C0",
+            "material": "metal"
+        },
+        "pocket": {
+            "style": "side",
+            "position": "side",
+            "size": 0.5
+        },
+        "stitch": {
+            "type": "double",
+            "color": "#1a1a1a",
+            "distance_from_edge": 3.0,
+            "spacing": 2.0
+        },
+        "logo": {
+            "style": "patch",
+            "motif": "lightning",
+            "position": "back",
+            "scale": 0.35
         },
         "extras": []
     }

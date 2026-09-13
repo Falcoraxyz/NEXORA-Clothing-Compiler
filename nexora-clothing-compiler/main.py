@@ -11,7 +11,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.compiler.dsl_schema import ClothingSpec, EXAMPLE_SPEC, EXAMPLE_TSHIRT_SPEC, EXAMPLE_PANTS_SPEC
+from src.compiler.dsl_schema import ClothingSpec, EXAMPLE_SPEC, EXAMPLE_TSHIRT_SPEC, EXAMPLE_PANTS_SPEC, EXAMPLE_JACKET_SPEC
 from src.compiler.constraint_solver import ConstraintSolver, solve_constraints
 from src.compiler.uv_constraint_graph import build_uv_graph
 from src.engine.template_generator import ProceduralTemplateGeneratorV2, generate_roblox_template_v2
@@ -132,6 +132,16 @@ def main():
     )
     template3 = compile_clothing(EXAMPLE_PANTS_SPEC, output_path3)
     results["pants"] = output_path3
+    
+    # Test Jacket
+    print("\n" + "=" * 60)
+    print("TEST 4: Jacket (Bomber Jacket)")
+    print("=" * 60)
+    output_path4 = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "output", "bomber_jacket.png"
+    )
+    template4 = compile_clothing(EXAMPLE_JACKET_SPEC, output_path4)
+    results["jacket"] = output_path4
     
     print(f"\n\nSummary:")
     for name, path in results.items():
