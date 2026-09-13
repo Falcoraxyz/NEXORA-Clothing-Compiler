@@ -474,20 +474,16 @@ class ProceduralTemplateGeneratorV2:
         )
     
     def _add_logo(self):
-        """Add logo to specified position."""
+        """Add logo/graffiti to specified position."""
         logo = self.spec.garment.logo
-        if not logo:
+        if not logo or not logo.is_valid:
             return
         
         # Determine panel based on position
         position = logo.position
         panel_id = "front"
         
-        if "left" in position:
-            panel_id = "front"
-        elif "right" in position:
-            panel_id = "front"
-        elif "back" in position:
+        if "back" in position:
             panel_id = "back"
         
         if panel_id not in self.graph.panels:
@@ -503,44 +499,153 @@ class ProceduralTemplateGeneratorV2:
         elif "sleeve" in position:
             logo_x = x + w // 3
             logo_y = y + h // 3
+        elif "center" in position:
+            logo_x = x + w // 4
+            logo_y = y + h // 3
         else:
             logo_x = x + w // 3
             logo_y = y + h // 3
         
         logo_size = int(min(w, h) * logo.scale)
-        
-        # Draw logo (simplified as text or shape)
-        motif = logo.motif
         logo_color = self._hex_to_rgb(self.spec.garment.color.accent or "#FFFFFF")
+        outline_color = self._hex_to_rgb(self.spec.garment.color.secondary or "#000000")
         
-        if motif == "skull":
-            # Simple skull shape
-            self.draw.ellipse(
-                [logo_x, logo_y, logo_x + logo_size, logo_y + logo_size],
-                fill=None,
-                outline=logo_color,
-                width=2
-            )
-            # Eyes
-            eye_size = logo_size // 5
-            self.draw.ellipse(
-                [logo_x + logo_size // 4, logo_y + logo_size // 3,
-                 logo_x + logo_size // 4 + eye_size, logo_y + logo_size // 3 + eye_size],
-                fill=logo_color
-            )
-            self.draw.ellipse(
-                [logo_x + logo_size * 3 // 4 - eye_size, logo_y + logo_size // 3,
-                 logo_x + logo_size * 3 // 4, logo_y + logo_size // 3 + eye_size],
-                fill=logo_color
-            )
+        style = logo.style.value
+        
+        if style == "graffiti":
+            self._draw_graffiti(logo_x, logo_y, logo_size, logo.motif, logo_color, outline_color)
+        elif style == "throwup":
+            self._draw_throwup(logo_x, logo_y, logo_size, logo.motif, logo_color, outline_color)
+        elif style == "tag":
+            self._draw_tag(logo_x, logo_y, logo_size, logo.motif, logo_color)
+        elif style == "wildstyle":
+            self._draw_wildstyle(logo_x, logo_y, logo_size, logo.motif, logo_color, outline_color)
+        elif motif == "skull":
+            self._draw_skull_logo(logo_x, logo_y, logo_size, logo_color)
         else:
-            # Default: circle logo
-            self.draw.ellipse(
-                [logo_x, logo_y, logo_x + logo_size, logo_y + logo_size],
-                fill=None,
-                outline=logo_color,
-                width=2
-            )
+            self._draw_print_logo(logo_x, logo_y, logo_size, logo_color)
+    
+    def _draw_graffiti(self, x, y, size, motif, color, outline):
+        """Draw graffiti-style bubble letters."""
+        letters = motif.upper()[:4]
+        letter_w = size // max(len(letters), 1)
+        
+        for i, letter in enumerate(letters):
+            lx = x + i * letter_w
+            ly = y
+            
+            # Shadow
+            shadow_offset = 3
+            self.draw.text((lx + shadow_offset, ly + shadow_offset), letter,
+                         fill=outline, font=None)
+            
+            # Main letter (bubble style)
+            bbox = [lx, ly, lx + letter_w - 2, ly + size - 2]
+            self.draw.ellipse(bbox, fill=color, outline=outline, width=2)
+            
+            # Highlight
+            highlight_bbox = [lx + 4, ly + 4, lx + letter_w // 2, ly + size // 2]
+            self.draw.ellipse(highlight_bbox, fill=None, outline=outline, width=1)
+            
+            # Arrow
+            if i == len(letters) - 1:
+                arrow_x = lx + letter_w
+                arrow_y = ly + size // 2
+                self.draw.polygon([(arrow_x, arrow_y), (arrow_x + 10, arrow_y - 5),
+                                 (arrow_x + 10, arrow_y + 5)], fill=color)
+    
+    def _draw_throwup(self, x, y, size, motif, color, outline):
+        """Draw throwup-style (filled bubble) letters."""
+        letters = motif.upper()[:3]
+        letter_w = size // max(len(letters), 1)
+        
+        for i, letter in enumerate(letters):
+            lx = x + i * letter_w
+            ly = y + (i % 2) * 10
+            
+            # Filled bubble
+            bbox = [lx, ly, lx + letter_w - 4, ly + size - 4]
+            self.draw.ellipse(bbox, fill=color, outline=outline, width=2)
+            
+            # Drip effect
+            drip_x = lx + letter_w // 2
+            drip_y = ly + size - 4
+            for d in range(3):
+                self.draw.line([(drip_x + d * 3, drip_y), (drip_x + d * 3, drip_y + 15 + d * 5)],
+                             fill=color, width=2)
+    
+    def _draw_tag(self, x, y, size, motif, color):
+        """Draw tag-style (handstyle) signature."""
+        letters = motif.upper()[:5]
+        letter_w = size // max(len(letters), 1)
+        
+        # Draw connected letters (cursive style)
+        for i, letter in enumerate(letters):
+            lx = x + i * letter_w
+            ly = y + int(np.sin(i * 0.8) * 10)
+            
+            # Letter with connecting lines
+            self.draw.text((lx, ly), letter, fill=color, font=None)
+            
+            # Connecting line
+            if i < len(letters) - 1:
+                self.draw.line([(lx + letter_w - 5, ly + size // 2),
+                              (lx + letter_w + 5, ly + size // 2)], fill=color, width=2)
+        
+        # Underline swoosh
+        self.draw.arc([x, y + size - 5, x + len(letters) * letter_w, y + size + 10],
+                     0, 180, fill=color, width=2)
+    
+    def _draw_wildstyle(self, x, y, size, motif, color, outline):
+        """Draw wildstyle (complex interlocking) graffiti."""
+        letters = motif.upper()[:3]
+        letter_w = size // max(len(letters), 1)
+        
+        for i, letter in enumerate(letters):
+            lx = x + i * letter_w
+            ly = y
+            
+            # Interlocking shapes
+            points = [
+                (lx, ly + size),
+                (lx + letter_w // 2, ly),
+                (lx + letter_w, ly + size),
+                (lx + letter_w // 2, ly + size // 2)
+            ]
+            self.draw.polygon(points, fill=color, outline=outline)
+            
+            # Cross bars
+            self.draw.line([(lx, ly + size // 2), (lx + letter_w, ly + size // 2)],
+                         fill=outline, width=2)
+            
+            # Arrows through letters
+            arrow_y = ly + size // 2
+            self.draw.line([(lx - 10, arrow_y), (lx + letter_w + 10, arrow_y)],
+                         fill=color, width=3)
+            # Arrow head
+            self.draw.polygon([(lx + letter_w + 10, arrow_y),
+                             (lx + letter_w, arrow_y - 5),
+                             (lx + letter_w, arrow_y + 5)], fill=color)
+    
+    def _draw_skull_logo(self, x, y, size, color):
+        """Draw skull logo."""
+        # Skull shape
+        self.draw.ellipse([x, y, x + size, y + size], fill=color, outline=color, width=2)
+        # Eyes
+        eye_size = size // 5
+        self.draw.ellipse([x + size // 4, y + size // 3, x + size // 4 + eye_size, y + size // 3 + eye_size], fill=(0, 0, 0))
+        self.draw.ellipse([x + size * 3 // 4 - eye_size, y + size // 3, x + size * 3 // 4, y + size // 3 + eye_size], fill=(0, 0, 0))
+        # Nose
+        nose_size = size // 8
+        self.draw.polygon([(x + size // 2, y + size // 2), (x + size // 2 - nose_size, y + size // 2 + nose_size), (x + size // 2 + nose_size, y + size // 2 + nose_size)], fill=(0, 0, 0))
+        # Teeth
+        for i in range(4):
+            tx = x + size // 4 + i * size // 8
+            self.draw.rectangle([tx, y + size * 2 // 3, tx + size // 10, y + size * 3 // 4], fill=(0, 0, 0))
+    
+    def _draw_print_logo(self, x, y, size, color):
+        """Draw simple print logo (circle)."""
+        self.draw.ellipse([x, y, x + size, y + size], fill=None, outline=color, width=3)
     
     def _add_chain(self):
         """Add chain accessory."""

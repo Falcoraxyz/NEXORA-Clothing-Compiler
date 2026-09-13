@@ -56,6 +56,10 @@ class LogoStyle(str, Enum):
     EMBROIDERY = "embroidery"
     PRINT = "print"
     PATCH = "patch"
+    GRAFFITI = "graffiti"
+    THROWUP = "throwup"
+    TAG = "tag"
+    WILDSTYLE = "wildstyle"
 
 
 @dataclass
